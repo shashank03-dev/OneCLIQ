@@ -39,7 +39,7 @@ export function Skills() {
               Teach your coding agent <em>how</em> seniors work.
             </h2>
             <p className="mt-6 max-w-xl text-[16px] leading-[1.75] text-night-ink/75">
-              {SKILLS.length} hand-written skills across {DOMAINS.length} domains: reviews, migrations, CI, security, tests, Gemma 4.
+              {SKILLS.length} hand-written skills across {DOMAINS.length} domains: planning, debugging, reviews, migrations, CI, security, tests, Gemma 4.
               Each is a plain <code className="font-mono text-night-ink">SKILL.md</code> that Claude Code, Codex, Cursor, Gemini CLI,
               Copilot and OpenCode load on their own.
             </p>

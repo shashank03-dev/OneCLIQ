@@ -3,6 +3,7 @@ import BlurText from "@/components/designpass/BlurText";
 import SoftPatterns from "@/components/designpass/SoftPatterns";
 import { Resolver } from "@/components/resolver";
 import { HeroTiles } from "@/components/hero-tiles";
+import { SKILLS } from "@/core/skills";
 import { Landscape } from "@/components/ui/landscape";
 
 export function Hero() {
@@ -36,7 +37,7 @@ export function Hero() {
             <span className="rounded-full bg-ink px-2 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.12em] text-paper">
               New
             </span>
-            <span className="text-shimmer">21 agent skills for your coding agent</span>
+            <span className="text-shimmer">{SKILLS.length} agent skills for your coding agent</span>
             <ArrowRight aria-hidden className="size-3.5 transition-transform group-hover:translate-x-0.5" />
           </a>
 

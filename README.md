@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/shashank03-dev/OneCLIQ/actions/workflows/ci.yml/badge.svg)](https://github.com/shashank03-dev/OneCLIQ/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/onecliq?label=npm%20%C2%B7%20onecliq)](https://www.npmjs.com/package/onecliq)
-[![Agent Skills](https://img.shields.io/badge/agent%20skills-21-7c6cf0)](skills)
+[![Agent Skills](https://img.shields.io/badge/agent%20skills-43-7c6cf0)](skills)
 [![Gemma 4](https://img.shields.io/badge/reviews%20by-Gemma%204-e5582b)](#-review-pull-requests-with-gemma-4)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | 📦 **Get the right file** | Paste a GitHub link. OneCLIQ picks the release file built for your OS and CPU, checks where it came from, and looks it up for known malware. | [Web](https://onecliq-eta.vercel.app) · `oqgit owner/repo` |
 | 🔍 **Review a pull request** | Gemma 4 ranks issues by risk, gives each one a failure scenario and a fix, decides if it's safe to merge, and writes one fix prompt for your agent. | [Web](https://onecliq-eta.vercel.app/review) · `oqgit review` |
-| 🧠 **Teach your agent** | 21 hand-written [Agent Skills](https://agentskills.io) in 7 domains. One command installs them into Claude Code, Codex, Cursor, Gemini CLI, Copilot or OpenCode. | [Web](https://onecliq-eta.vercel.app/skills) · `oqgit skills` |
+| 🧠 **Teach your agent** | 43 hand-written [Agent Skills](https://agentskills.io) in 9 domains. One command installs them into Claude Code, Codex, Cursor, Gemini CLI, Copilot or OpenCode. | [Web](https://onecliq-eta.vercel.app/skills) · `oqgit skills` |
 
 Everything runs on one open-source engine, shared by the web app, the `oqgit` CLI, and an MCP server for coding agents.
 
@@ -52,7 +52,7 @@ The installers are short and readable ([install.sh](public/install.sh), [install
 | Track | How OneCLIQ fits |
 | --- | --- |
 | **Best Use of Gemma 4** | Code review runs on `gemma-4-31b-it`, with the `gemma-4-26b-a4b-it` mixture-of-experts model as a fast fallback. A key pool rotates free-tier keys, rests rate-limited ones and trims oversized diffs so it works on free quotas. The merge verdict is computed from Gemma's structured findings, so it's deterministic. |
-| **Best Open-Source AI Project** | MIT licensed. Ships 21 agent skills that follow the [Agent Skills open standard](https://agentskills.io/specification) (validated in CI), an original zero-dependency MCP server, and a CLI that installs skills into six coding agents. |
+| **Best Open-Source AI Project** | MIT licensed. Ships 43 agent skills that follow the [Agent Skills open standard](https://agentskills.io/specification) (validated in CI), an original zero-dependency MCP server, and a CLI that installs skills into six coding agents. |
 
 ---
 
@@ -62,13 +62,17 @@ Skills are folders with a `SKILL.md`: instructions a coding agent loads when the
 
 | Domain | Skills |
 | --- | --- |
-| **Frontend** | `react-performance` · `web-accessibility` · `micro-interactions` |
-| **Backend** | `rest-api-design` · `safe-database-migrations` · `idempotent-webhooks` |
-| **DevOps** | `github-actions-ci` · `dockerfile-best-practices` · `release-binaries` |
-| **Security** | `secure-code-review` · `secrets-hygiene` · `supply-chain-verify` |
-| **Testing** | `write-unit-tests` · `flaky-test-triage` · `playwright-e2e` |
-| **AI engineering** | `gemma-4-prompting` · `llm-evals` · `mcp-server-builder` |
-| **Git workflow** | `pull-request-review` · `conventional-commits` · `git-recovery` |
+| **Workflow** | `grill-the-plan` · `write-a-spec` · `plan-and-break-down` · `systematic-debugging` · `verify-before-done` · `session-handoff` · `codebase-architecture` · `safe-refactoring` · `architecture-decision-records` |
+| **Frontend** | `frontend-design` · `react-performance` · `web-performance` · `web-accessibility` · `micro-interactions` |
+| **Backend** | `rest-api-design` · `postgres-best-practices` · `safe-database-migrations` · `idempotent-webhooks` |
+| **DevOps** | `github-actions-ci` · `dockerfile-best-practices` · `release-binaries` · `pre-commit-guardrails` · `observability-instrumentation` |
+| **Security** | `secure-code-review` · `auth-best-practices` · `secrets-hygiene` · `supply-chain-verify` |
+| **Testing** | `test-driven-development` · `write-unit-tests` · `flaky-test-triage` · `playwright-e2e` · `exploratory-qa` |
+| **AI engineering** | `gemma-4-prompting` · `llm-evals` · `mcp-server-builder` · `write-agent-skills` · `context-engineering` |
+| **Git workflow** | `pull-request-review` · `conventional-commits` · `git-recovery` · `git-worktrees` |
+| **Languages** | `typescript-type-design` · `go-idioms` |
+
+The topics follow what developers install most on [skills.sh](https://skills.sh): planning and grilling, TDD, systematic debugging, verification and handoffs sit at the top of its leaderboard. Every skill here is original text (MIT); skills inspired by public ones credit them in `metadata.inspired-by` and in the [skills README](skills/README.md#credits).
 
 ### Add skills from the terminal
 
@@ -106,7 +110,7 @@ Then just ask: *"find a skill for safe database migrations and install it."* The
 
 ### Write a skill
 
-1. Create `skills/<domain>/<name>/SKILL.md` with `name` (same as the folder), `description` (what it does **and when to use it**), `license` and `metadata.domain`.
+1. Create `skills/<domain>/<name>/SKILL.md` with `name` (same as the folder), `description` (what it does **and when to use it**), `license` and `metadata.domain`. The `write-agent-skills` skill walks through it.
 2. Run `npm run skills:build`. It checks every skill against the standard and regenerates the catalog.
 3. Open a PR. CI runs `npm run skills:check`.
 

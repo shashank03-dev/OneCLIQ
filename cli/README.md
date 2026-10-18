@@ -56,7 +56,7 @@ The published package is `onecliq` on npm (`npm install -g onecliq`); maintainer
 
 ## Add skills to your coding agent
 
-`oqgit` ships a library of 21 [Agent Skills](https://agentskills.io) for developers in 7 domains (frontend, backend, DevOps, security, testing, AI engineering, git workflow).
+`oqgit` ships a library of 43 [Agent Skills](https://agentskills.io) for developers in 9 domains (workflow, frontend, backend, DevOps, security, testing, AI engineering, git workflow, languages).
 
 ```bash
 oqgit skills                                   # browse by domain
