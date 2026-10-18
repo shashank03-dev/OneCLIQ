@@ -10,6 +10,7 @@ import { MalwarePanel } from "./malware-panel";
 import { TrustPanel } from "./trust-panel";
 import { DecryptedText } from "./ui/decrypted-text";
 import { cn } from "@/lib/cn";
+import { ShareDownload } from "./share-download";
 
 const DOWNLOADING_MS = 6000;
 
@@ -151,6 +152,7 @@ export function ResultCard({ result }: { result: ResolveSuccess }) {
               </a>
             </>
           )}
+        <ShareDownload result={result} />
       </article>
     </motion.div>
   );

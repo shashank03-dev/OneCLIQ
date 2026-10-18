@@ -57,6 +57,32 @@ For example, `https://github.com/zellij-org/zellij` becomes [`…/download?repo=
 > [!NOTE]
 > OneCLIQ never hosts, changes or installs files. The Download button always goes to the file on GitHub.
 
+### Share a one-tap download or embed a button
+
+After finding a download, use **Share or embed this download** to copy a link, HTML button, or Markdown badge. Every generated link starts on your OneCLIQ domain.
+
+```
+https://onecliq-eta.vercel.app/get/cli/cli
+```
+
+This opens OneCLIQ, detects the visitor’s computer, and starts the latest stable release download. If detection is incomplete or the visitor is on a phone, they choose the target system first. A visible Download button lets them retry when their browser blocks automatic downloads. Open the downloaded installer or archive to finish installing.
+
+For a specific system, the direct link resolves the latest stable release and temporarily redirects straight to GitHub:
+
+```
+https://onecliq-eta.vercel.app/api/download?repo=cli/cli&os=windows&arch=x64
+```
+
+```html
+<a href="https://onecliq-eta.vercel.app/get/cli/cli"><img src="https://onecliq-eta.vercel.app/download-badge.svg" alt="Download cli/cli with OneCLIQ" width="196" height="36"></a>
+```
+
+```markdown
+[![Download cli/cli with OneCLIQ](https://onecliq-eta.vercel.app/download-badge.svg)](https://onecliq-eta.vercel.app/get/cli/cli)
+```
+
+Reusable links always track **latest stable**, including links generated while viewing an older tag or prerelease. They use the existing five-minute GitHub metadata cache; redirect responses themselves are never cached. Unmatched assets return HTTP 422 instead of downloading a guessed file. For self-hosting, set `NEXT_PUBLIC_SITE_URL` to your canonical HTTPS origin before building; otherwise links use the current browser origin. No database or additional DNS setup is needed.
+
 ---
 
 ## How to use it

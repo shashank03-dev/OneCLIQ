@@ -58,9 +58,9 @@ type State =
   | { kind: "success"; result: ResolveSuccess }
   | { kind: "error"; code: ErrorCode; message: string; retryAfter?: number };
 
-export function Resolver() {
+export function Resolver({ initialUrl = "", autoDownload = false }: { initialUrl?: string; autoDownload?: boolean }) {
   const ids = { url: useId(), urlHint: useId(), os: useId(), arch: useId(), sysHint: useId() };
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(initialUrl);
   const [os, setOs] = useState<Os | "">("");
   const [arch, setArch] = useState<Arch | "">("");
   const [detected, setDetected] = useState<DetectedPlatform | null>(null);
@@ -68,6 +68,9 @@ export function Resolver() {
   const [state, setState] = useState<State>({ kind: "idle" });
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const interactedRef = useRef(false);
+  const startedRef = useRef(false);
+  const [downloadRequested, setDownloadRequested] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,11 +78,12 @@ export function Resolver() {
       .then((d) => {
         if (cancelled) return;
         setDetected(d);
+        if (interactedRef.current) return;
         // Only pre-fill what the browser actually told us; otherwise leave it for the user.
         if (d.os) setOs((cur) => cur || d.os!);
         if (d.os && d.arch && ARCHES_FOR_OS[d.os].includes(d.arch)) setArch((cur) => cur || d.arch!);
         // Shareable links: /download?repo=owner/repo fills the box, and runs it when we know the system.
-        const shared = sharedRepo();
+        const shared = initialUrl || sharedRepo();
         if (shared) {
           setUrl(shared);
           if (!d.mobile && d.os && d.arch && ARCHES_FOR_OS[d.os].includes(d.arch)) void submit(shared, { os: d.os, arch: d.arch });
@@ -88,17 +92,26 @@ export function Resolver() {
       .catch(() => setDetected({ mobile: false }));
     return () => {
       cancelled = true;
+      abortRef.current?.abort();
     };
     // Runs once on mount; submit() gets the detected system passed in, so its stale closure is fine.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialUrl]);
+
+  function invalidate() {
+    interactedRef.current = true;
+    abortRef.current?.abort();
+    setState({ kind: "idle" });
+  }
 
   function changeOs(next: Os | "") {
+    invalidate();
     setOs(next);
     if (next && arch && !ARCHES_FOR_OS[next].includes(arch)) setArch("");
   }
 
   async function submit(value = url, system?: { os: Os; arch: Arch }) {
+    abortRef.current?.abort();
     const pickedOs = system?.os ?? os;
     const pickedArch = system?.arch ?? arch;
     setFieldError(null);
@@ -114,15 +127,25 @@ export function Resolver() {
       return;
     }
 
-    abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     setState({ kind: "loading" });
 
     try {
       const body = await postJson<ResolveResponse>("/api/resolve", { url: value, os: pickedOs, arch: pickedArch }, controller.signal);
+      if (controller.signal.aborted) return;
       if (body.ok) {
         setState({ kind: "success", result: body });
+        if (autoDownload && !startedRef.current && body.recommendation.status === "recommended") {
+          startedRef.current = true;
+          setDownloadRequested(true);
+          const link = document.createElement("a");
+          link.href = body.recommendation.asset.downloadUrl;
+          link.rel = "noopener noreferrer";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+        }
       } else if (body.error.code === "INVALID_URL") {
         setState({ kind: "idle" });
         setFieldError(body.error.message);
@@ -155,11 +178,19 @@ export function Resolver() {
 
   return (
     <div className="w-full">
+      {autoDownload && (
+        <p data-testid="auto-download-status" role="status" className="mb-4 rounded-2xl border border-rule bg-paper-raised p-4 text-sm text-ink-muted">
+          {downloadRequested
+            ? "Your download was requested from GitHub. If it did not start, press Download below. Open the downloaded file to install it."
+            : "We’ll find the latest stable release and start your download. If your system is unknown, choose it below."}
+        </p>
+      )}
       <section aria-label="Find a download" className="rounded-[28px] border border-rule bg-paper-raised/85 p-2 shadow-card backdrop-blur-md sm:p-2.5">
         <form
           noValidate
           onSubmit={(e) => {
             e.preventDefault();
+            interactedRef.current = true;
             void submit();
           }}
           className="relative"
@@ -186,6 +217,7 @@ export function Resolver() {
                 spellCheck={false}
                 value={url}
                 onChange={(e) => {
+                  invalidate();
                   setUrl(e.target.value);
                   if (fieldError) setFieldError(null);
                 }}
@@ -217,7 +249,7 @@ export function Resolver() {
               id={ids.arch}
               label="Architecture"
               value={arch}
-              onChange={(v) => setArch(v as Arch | "")}
+              onChange={(v) => { invalidate(); setArch(v as Arch | ""); }}
               describedBy={ids.sysHint}
               disabled={!os}
               options={archOptions.map((v) => ({ value: v, label: archLabel(os as Os, v) }))}
@@ -255,6 +287,7 @@ export function Resolver() {
             key={ex.label}
             type="button"
             onClick={() => {
+              invalidate();
               setUrl(ex.url);
               void submit(ex.url);
             }}
