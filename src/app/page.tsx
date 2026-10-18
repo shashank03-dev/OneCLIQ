@@ -1,15 +1,14 @@
-import { Cli } from "@/components/sections/cli";
-import { Closing } from "@/components/sections/closing";
+import { Faq } from "@/components/sections/faq";
+import { Flow } from "@/components/sections/flow";
 import { Hero } from "@/components/sections/hero";
-import { HowItWorks } from "@/components/sections/how-it-works";
-import { Pipeline } from "@/components/sections/pipeline";
+import { Proof } from "@/components/sections/proof";
 import { SiteFooter } from "@/components/sections/site-footer";
 import { SiteNav } from "@/components/sections/site-nav";
-import { Verify } from "@/components/sections/verify";
-import { ReviewShowcase } from "@/components/sections/review-showcase";
-import { Skills } from "@/components/sections/skills";
+import { Tools } from "@/components/sections/tools";
+import { NextStep } from "@/components/ui/page-chrome";
 import { ScrollProgress } from "@/components/ui/scroll-progress";
 
+/** Short landing: try it, see the three tools, learn the steps, get answers, then where to go next. */
 export default function Home() {
   return (
     <>
@@ -23,13 +22,11 @@ export default function Home() {
       <SiteNav />
       <main id="main" className="flex-1">
         <Hero />
-        <Pipeline />
-        <HowItWorks />
-        <ReviewShowcase />
-        <Skills />
-        <Verify />
-        <Cli />
-        <Closing />
+        <Proof />
+        <Tools />
+        <Flow />
+        <Faq />
+        <NextStep page="home" className="pb-24" />
       </main>
       <SiteFooter />
     </>

@@ -17,6 +17,15 @@ use the Tailwind token classes below (`bg-paper`, `text-ink-muted`, `border-rule
 
 ---
 
+## Site structure
+
+The landing page stays short: **hero with the live link box → trust strip → tools bento → how it works → FAQ → next step**.
+Depth lives on its own pages, read in this order (`src/lib/site.ts` is the single source for nav, footer and
+next-step links): `/start` (guided tour) → `/download` → `/review` → `/skills` → `/cli`. Every page opens with a
+breadcrumb and ends with `NextStep`, so a visitor never hits a dead end. Patterns come from the
+[vibrant.design](https://vibrant.design) gallery: Equals (centered serif hero + one input), bento grids with mini UI,
+Natural (tabbed feature panel over a photo), Steel (closing night banner), Framer/Equals (link-column footer).
+
 ## Color
 
 ### Paper (light sections, default)
@@ -96,6 +105,11 @@ Scale: display `clamp(44px, 7vw, 92px)` · h2 `clamp(36px, 5vw, 64px)` · h3 20p
 | `CopyButton` | in-house (`ui/copy-button.tsx`) | Copy with an icon that springs to a check, announced via `aria-live` |
 | `ScrollProgress` | in-house (`ui/scroll-progress.tsx`) | Ember→dusk hairline at the top of the landing page |
 | `SkillBrowser` | in-house (`skills/skill-browser.tsx`) | Search (`/` to focus), domain and agent pills with a sliding indicator, SKILL.md drawer |
+| `Breadcrumb` · `NextStep` | in-house (`ui/page-chrome.tsx`) | “Home › Page” at the top of every page; a night banner at the bottom naming the next page in the tour |
+| `Tools` | in-house (`sections/tools.tsx`) | Landing bento: one card per tool with a small static preview of its real UI |
+| `Flow` | in-house (`sections/flow.tsx`) | Tabbed “how it works”: pick a tool, three numbered steps that auto-advance over a painted panel |
+| `Faq` | in-house (`sections/faq.tsx`) | Native `<details>` accordion with a rotating plus |
+| `GuideToc` | in-house (`guide-toc.tsx`) | Sticky “On this page” list on /start that lights the current step and marks earlier ones done |
 
 DesignPass components are by Ernest Liu (ernestliu.com), MIT licensed; keep the header comment in each file
 under `src/components/designpass/`.
