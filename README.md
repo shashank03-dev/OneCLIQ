@@ -75,14 +75,17 @@ cp .env.example .env.local
 | `NEXT_PUBLIC_SITE_URL` | Public base URL used for absolute metadata URLs. Set it to your deployment's actual address. |
 | `RESOLVE_RATE_LIMIT_PER_MIN` | Requests per minute per IP and per server instance, across all five API routes. Default: `30`. |
 | `GITHUB_API_BASE_URL` | Test-only override for a mock GitHub API. Leave it unset in production. |
-| `GEMINI_API_KEY` | Enables `/review` and `/api/review` (Gemma 4 code review). Without it, the page explains that reviews aren't enabled. Keep it private. |
-| `REVIEW_MODEL` | Model for web reviews. Default: `gemma-4-31b-it`. |
-| `REVIEW_THINKING` | `high` (default, thorough, can take minutes) or `minimal` (much faster). |
+| `GEMINI_API_KEYS` | One or more Gemini API keys, comma- or newline-separated. Enables `/review` and `/api/review` (Gemma 4 code review). Requests rotate across keys; a rate-limited key rests until its quota resets while the others carry on. Keep them private. |
+| `GEMINI_API_KEY` | A single key (or another list). Merged with `GEMINI_API_KEYS`. |
+| `REVIEW_MODEL` | Primary model for web reviews. Default: `gemma-4-31b-it`. |
+| `REVIEW_FALLBACK_MODELS` | Tried in order when the primary model is rate limited or overloaded on every key. Default: `gemma-4-26b-a4b-it` (Gemma 4 MoE: faster, separate quota). `none` turns fallback off. |
+| `REVIEW_THINKING` | `minimal` (default on the web: fits the 300s function limit) or `high` (more thorough, can take minutes). |
+| `REVIEW_MAX_INPUT_TOKENS` | Optional per-request input cap; trims large diffs up front (e.g. `16000` on the free tier). Learned automatically from the first rejection otherwise. |
 | `REVIEW_RATE_LIMIT_PER_MIN` | Reviews per minute per IP and per server instance, on top of the general limit. Default: `3`. |
 | `GEMINI_API_BASE_URL` | Test-only override for a mock Gemini API. Leave it unset in production. |
 | `VIRUSTOTAL_API_BASE_URL` | Test-only override for a mock VirusTotal API. Leave it unset in production. |
 
-The CLI reads `GITHUB_TOKEN` or `GH_TOKEN`. It also reads `VIRUSTOTAL_API_KEY` for hash reputation and `OQGIT_CLAMSCAN` to point at a specific ClamAV binary, and supports `OQGIT_MIN_AGE` for a default release cooldown and `OQGIT_HOME` for its tracking directory. `OQGIT_API_BASE` and `OQGIT_VT_API_BASE` are CLI API overrides intended for tests. `oqgit review` reads `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) and `OQGIT_REVIEW_MODEL`.
+The CLI reads `GITHUB_TOKEN` or `GH_TOKEN`. It also reads `VIRUSTOTAL_API_KEY` for hash reputation and `OQGIT_CLAMSCAN` to point at a specific ClamAV binary, and supports `OQGIT_MIN_AGE` for a default release cooldown and `OQGIT_HOME` for its tracking directory. `OQGIT_API_BASE` and `OQGIT_VT_API_BASE` are CLI API overrides intended for tests. `oqgit review` reads `GEMINI_API_KEYS` / `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), `OQGIT_REVIEW_MODEL` and `OQGIT_REVIEW_FALLBACK_MODELS`.
 
 ## HTTP API
 
@@ -241,7 +244,7 @@ npm run test:e2e
 
 ### Vercel
 
-Import the repository as a Next.js project and keep the default build settings. Add `GITHUB_TOKEN` to your server-side deployment environment if you expect sustained API traffic. Add `VIRUSTOTAL_API_KEY` to enable the malware hash checks; without it the panel reports the check as unavailable. Set `NEXT_PUBLIC_SITE_URL` to the actual public site address for correct metadata URLs. Deploy and test with a public GitHub repository.
+Import the repository as a Next.js project and keep the default build settings. Add `GEMINI_API_KEYS` to enable reviews. `/api/review` runs to a deadline inside a 300-second function limit (the Vercel Hobby maximum). `GET /api/health` reports which features are configured, without revealing any keys. Rate limits are kept per server instance, so they're best-effort. Add `GITHUB_TOKEN` to your server-side deployment environment if you expect sustained API traffic. Add `VIRUSTOTAL_API_KEY` to enable the malware hash checks; without it the panel reports the check as unavailable. Set `NEXT_PUBLIC_SITE_URL` to the actual public site address for correct metadata URLs. Deploy and test with a public GitHub repository.
 
 Do not set the test-only `GITHUB_API_BASE_URL` or `VIRUSTOTAL_API_BASE_URL` in production.
 

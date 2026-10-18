@@ -1,7 +1,7 @@
 {
   "name": "oqgit",
   "version": "0.1.0",
-  "description": "Find and download the right file from any GitHub release for this machine.",
+  "description": "Find and download the right file from any GitHub release for this machine, and review pull requests with Gemma 4.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -28,6 +28,16 @@
     "github",
     "releases",
     "download",
-    "cli"
-  ]
+    "cli",
+    "code-review",
+    "pull-request",
+    "gemma",
+    "mcp"
+  ],
+  "scripts": {
+    "prepublishOnly": "test -f dist/oqgit.mjs || (echo 'Run npm run cli:build from the repo root first' && exit 1)"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

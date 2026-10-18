@@ -1,15 +1,16 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { Check, CircleCheck, CircleX, ClipboardCopy, GitPullRequest, Loader2, TriangleAlert } from "lucide-react";
 import { parseReviewTarget } from "@/core/review/target";
 import { SEVERITY_LABELS, type ReviewResult, type Severity } from "@/core/review/types";
+import { postJson } from "@/lib/api";
 import { cn } from "@/lib/cn";
 
 type State =
   | { kind: "idle" }
-  | { kind: "loading" }
+  | { kind: "loading"; startedAt: number }
   | { kind: "done"; result: ReviewResult }
   | { kind: "error"; message: string };
 
@@ -28,6 +29,8 @@ export function PrReviewer() {
   const [state, setState] = useState<State>({ kind: "idle" });
   const reduce = useReducedMotion();
   const busy = state.kind === "loading";
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   async function run() {
     try {
@@ -35,18 +38,16 @@ export function PrReviewer() {
     } catch (err) {
       return setState({ kind: "error", message: err instanceof Error ? err.message : "That link doesn’t look right." });
     }
-    setState({ kind: "loading" });
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setState({ kind: "loading", startedAt: Date.now() });
     try {
-      const res = await fetch("/api/review", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url, ...(goal.trim() ? { goal: goal.trim() } : {}) }),
-      });
-      const body = (await res.json()) as ReviewResult | { ok: false; error: { message: string } };
+      const body = await postJson<ReviewResult>("/api/review", { url, ...(goal.trim() ? { goal: goal.trim() } : {}) }, controller.signal);
       if (body.ok) setState({ kind: "done", result: body });
       else setState({ kind: "error", message: body.error.message });
     } catch {
-      setState({ kind: "error", message: "We couldn’t reach the reviewer. Try again." });
+      /* aborted: the component went away */
     }
   }
 
@@ -116,6 +117,7 @@ export function PrReviewer() {
         {state.kind === "loading" && (
           <p className="mx-1 mt-2 flex items-center gap-2 rounded-[18px] border border-rule bg-paper px-4 py-3 text-[14px] text-ink-muted">
             <Loader2 aria-hidden className="size-4 animate-spin" /> Reading the diff and reviewing it with Gemma 4. This can take a few minutes…
+            <Elapsed since={state.startedAt} />
           </p>
         )}
         {state.kind === "done" && (
@@ -126,6 +128,16 @@ export function PrReviewer() {
       </div>
     </div>
   );
+}
+
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(since);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const s = Math.max(0, Math.floor((now - since) / 1000));
+  return <span className="ml-auto shrink-0 font-mono text-[12px] tabular-nums text-ink-subtle">{Math.floor(s / 60)}:{String(s % 60).padStart(2, "0")}</span>;
 }
 
 function ReviewReport({ result }: { result: ReviewResult }) {

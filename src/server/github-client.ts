@@ -1,4 +1,5 @@
 import { GitHubClient } from "@/core/github";
+import { githubConfig } from "./config";
 
 let client: GitHubClient | undefined;
 
@@ -6,9 +7,7 @@ let client: GitHubClient | undefined;
 export function getGitHubClient(): GitHubClient {
   if (!client) {
     client = new GitHubClient({
-      token: process.env.GITHUB_TOKEN?.trim() || undefined,
-      // Test-only override (points e2e runs at a local mock). Never derived from requests.
-      apiBase: process.env.GITHUB_API_BASE_URL?.trim() || undefined,
+      ...githubConfig(),
       timeoutMs: 8000,
       userAgent: "onecliq-web",
     });
