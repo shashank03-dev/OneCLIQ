@@ -29,6 +29,8 @@ export function createReviewer(deadline: number) {
     apiBase: cfg.apiBase,
     thinking: cfg.thinking,
     deadline,
+    // One line per model call in the platform logs: which model, which key (by position), and what happened.
+    onAttempt: (a) => console.info(`[review] ${a.model} key ${a.key}/${a.keys} ${a.outcome} ${a.ms}ms`),
   });
   return {
     reviewer,
