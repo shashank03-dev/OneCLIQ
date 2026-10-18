@@ -5,7 +5,7 @@ import type { ModelReview, ReviewContext, ReviewResult } from "./types";
 import { buildFixPrompt, computeVerdict, sortFindings } from "./verdict";
 
 export { GitHubPrClient } from "./github-pr";
-export { DEFAULT_FALLBACK_MODELS, DEFAULT_REVIEW_MODEL, GemmaReviewer, ModelQuotaError } from "./gemma";
+export { DEFAULT_FALLBACK_MODELS, DEFAULT_REVIEW_MODEL, GemmaReviewer, ModelQuotaError, type ModelAttempt } from "./gemma";
 export { KeyPool, parseApiKeys } from "./key-pool";
 export { parseReviewTarget } from "./target";
 export { SEVERITIES, SEVERITY_LABELS, normalizeSeverity } from "./types";

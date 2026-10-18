@@ -128,3 +128,17 @@ describe("GemmaReviewer routing", () => {
     expect(() => new GemmaReviewer({ apiKey: "k", fallbackModels: ["../x"] })).toThrow(ResolveError);
   });
 });
+
+describe("GemmaReviewer attempt log", () => {
+  it("reports each attempt by key position and outcome", async () => {
+    const attempts: unknown[] = [];
+    const { impl } = api((model, key) => (key === "k1" ? quota() : model === "gemma-4-31b-it" ? new Response("{}", { status: 503 }) : ok()));
+    await new GemmaReviewer({ apiKeys: ["k1", "k2"], fetch: impl, now: () => 0, onAttempt: (a) => attempts.push(a), retryDelaysMs: [0] }).review("s", "u");
+    expect(attempts).toEqual([
+      { model: "gemma-4-31b-it", key: 1, keys: 2, outcome: "rate-limited", ms: 0 },
+      { model: "gemma-4-31b-it", key: 2, keys: 2, outcome: "overloaded", ms: 0 },
+      { model: "gemma-4-26b-a4b-it", key: 1, keys: 2, outcome: "rate-limited", ms: 0 },
+      { model: "gemma-4-26b-a4b-it", key: 2, keys: 2, outcome: "ok", ms: 0 },
+    ]);
+  });
+});

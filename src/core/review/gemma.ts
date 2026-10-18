@@ -43,6 +43,17 @@ export interface ModelClientOptions {
   maxWaitMs?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+  /** Called after every model request, for logs. Identifies keys by position only, never by value. */
+  onAttempt?: (attempt: ModelAttempt) => void;
+}
+
+export interface ModelAttempt {
+  model: string;
+  /** 1-based position of the key in the pool. */
+  key: number;
+  keys: number;
+  outcome: "ok" | "rate-limited" | "input-cap" | "key-rejected" | "model-missing" | "overloaded" | "error";
+  ms: number;
 }
 
 const ResponseSchema = z.object({
@@ -287,12 +298,29 @@ export class GemmaReviewer {
       for (const model of order) {
         if (this.missing.has(model)) continue;
         for (const i of this.pool.available(model, this.now())) {
+          const started = this.now();
+          const report = (outcome: ModelAttempt["outcome"]) =>
+            this.opts.onAttempt?.({ model, key: i + 1, keys: this.pool.size, outcome, ms: this.now() - started });
           try {
             const text = await this.generateOnce(model, this.pool.key(i), system, contents, thinking);
+            report("ok");
             this.pool.used(i);
             this.lastModel = model;
             return text;
           } catch (err) {
+            report(
+              err instanceof ModelQuotaError
+                ? err.inputTokenLimit
+                  ? "input-cap"
+                  : "rate-limited"
+                : err instanceof KeyRejectedError
+                  ? "key-rejected"
+                  : err instanceof ModelUnavailableError
+                    ? "model-missing"
+                    : err instanceof TransientModelError
+                      ? "overloaded"
+                      : "error",
+            );
             lastError = err instanceof TransientModelError ? err.cause : err;
             if (err instanceof ModelQuotaError) {
               // Rejected requests still count against the rolling minute, so rest at least that long.
