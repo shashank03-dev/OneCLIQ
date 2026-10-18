@@ -3,19 +3,21 @@ import { CliShowcase, CopyCommand } from "@/components/cli-showcase";
 import { MicroLabel } from "@/components/ui/micro-label";
 
 const COMMANDS = [
-  ["get", "owner/repo"],
+  ["owner/repo", ""],
+  ["owner/repo", "windows arm64"],
+  ["owner/repo@v1.2.3", ""],
   ["info", "owner/repo"],
   ["list", ""],
-  ["outdated", ""],
-  ["update", "[name]"],
-  ["doctor", ""],
+  ["update", ""],
   ["trust", "owner/repo"],
-  ["verify", "<file> -r owner/repo"],
+  ["malware", "owner/repo"],
+  ["verify", "<file> owner/repo"],
+  ["review", "12"],
   ["diff", "owner/repo"],
-  ["lock add", "owner/repo"],
-  ["lock check", ""],
+  ["lock", "owner/repo"],
   ["sync", ""],
   ["mcp", ""],
+  ["help", "<command>"],
 ];
 
 /** Night poster section (after the Perplexity “Search like never before” poster). */
@@ -62,7 +64,7 @@ export function Cli() {
 
         <ul className="mx-auto mt-8 flex max-w-3xl flex-wrap justify-center gap-2 font-mono text-[12.5px]">
           {COMMANDS.map(([cmd, arg]) => (
-            <li key={cmd} className="rounded-full border border-night-rule bg-night/60 px-3 py-1 text-night-muted backdrop-blur">
+            <li key={`${cmd} ${arg}`} className="rounded-full border border-night-rule bg-night/60 px-3 py-1 text-night-muted backdrop-blur">
               <span className="text-lilac">{cmd}</span>
               {arg && ` ${arg}`}
             </li>

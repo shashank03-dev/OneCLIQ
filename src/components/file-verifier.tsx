@@ -48,7 +48,7 @@ export function FileVerifier() {
     } catch {
       return setState({ kind: "error", message: "Enter the repository it should come from, like cli/cli." });
     }
-    if (f.size > MAX_BYTES) return setState({ kind: "error", message: `That file is over 2 GB. Use oqgit verify ${f.name} -r ${repo} instead.` });
+    if (f.size > MAX_BYTES) return setState({ kind: "error", message: `That file is over 2 GB. Use oqgit verify ${f.name} ${repo} instead.` });
 
     setState({ kind: "hashing", name: f.name, size: f.size });
     let sha256: string;

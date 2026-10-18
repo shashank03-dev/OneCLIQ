@@ -63,7 +63,7 @@ export function Verify() {
         <div className="min-w-0 lg:pt-4">
           <FileVerifier />
           <p className="mt-4 px-2 font-mono text-[11px] uppercase tracking-[0.13em] text-ink-subtle">
-            In a terminal: oqgit verify ./file -r owner/repo
+            In a terminal: oqgit verify ./file owner/repo
           </p>
         </div>
       </div>

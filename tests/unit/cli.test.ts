@@ -255,4 +255,40 @@ describe("oqgit main()", () => {
       await expect(readFile(path.join(dir, "state.json"))).rejects.toThrow();
     }
   });
+
+  it("shows help for one command, by name or alias", async () => {
+    expect((await run(["help", "get"])).out).toMatch(/oqgit get <repo>[\s\S]*--dry-run/);
+    expect((await run(["get", "--help"])).out).toMatch(/oqgit get <repo>/);
+    expect((await run(["help", "dl"])).out).toMatch(/oqgit get <repo>/);
+    expect((await run(["help", "all"])).out).toMatch(/--allow-download/);
+    expect((await run(["help", "nope"])).code).toBe(2);
+  });
+
+  it("reads plain OS and CPU words after the repo", async () => {
+    const linux = await run(["acme/tool", "linux", "x64", "--json", "--dry-run"]);
+    expect(linux.code).toBe(0);
+    expect(JSON.parse(linux.out).recommendation.asset.name).toBe("tool-linux-x64.tar.gz");
+    const win = await run(["get", "acme/tool", "win", "amd64", "--json", "--dry-run"]);
+    expect(JSON.parse(win.out).recommendation.asset.name).toBe("tool-windows-x64.zip");
+    expect((await run(["get", "acme/tool", "--os", "mac", "--arch", "intel", "--json"])).code).toBe(3);
+    const bad = await run(["get", "acme/tool", "banana"]);
+    expect(bad.code).toBe(2);
+    expect(bad.err).toMatch(/Didn't understand “banana”/);
+  });
+
+  it("reads owner/repo@tag as a release tag", async () => {
+    const { code, err } = await run(["acme/tool@v0.9.0", "linux", "x64", "--dry-run"]);
+    expect(code).toBe(1);
+    expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).endsWith("/repos/acme/tool/releases/tags/v0.9.0"))).toBe(true);
+    expect(err).not.toBe("");
+  });
+
+  it("accepts aliases and suggests a fix for typos", async () => {
+    const { code, out } = await run(["download", "acme/tool", "--os", "linux", "--arch", "x64", "--json", "--dry-run"]);
+    expect(code).toBe(0);
+    expect(JSON.parse(out).recommendation.asset.name).toBe("tool-linux-x64.tar.gz");
+    const typo = await run(["gte", "acme/tool"]);
+    expect(typo.code).toBe(2);
+    expect(typo.err).toMatch(/Did you mean .*oqgit get/);
+  });
 });

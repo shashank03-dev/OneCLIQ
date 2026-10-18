@@ -6,9 +6,9 @@ import { Check, Copy } from "lucide-react";
 
 type Line = { text: string; className?: string; delay?: number; prompt?: boolean };
 
-// Mirrors what `oqgit get` actually prints.
+// Mirrors what `oqgit <repo>` (short for `oqgit get <repo>`) actually prints.
 const SCRIPT: Line[] = [
-  { text: "oqgit get sharkdp/bat", prompt: true, delay: 500 },
+  { text: "oqgit sharkdp/bat", prompt: true, delay: 500 },
   { text: "" },
   { text: "  ◆ oqgit · GitHub release resolver", className: "text-lilac" },
   { text: "  │" },
@@ -67,7 +67,7 @@ export function CliShowcase() {
           <span className="ml-3 font-mono text-xs text-night-muted">~ — oqgit</span>
         </div>
         <pre
-          aria-label="Example: oqgit get sharkdp/bat finds and downloads the Apple Silicon build of bat."
+          aria-label="Example: oqgit sharkdp/bat finds and downloads the Apple Silicon build of bat."
           className="min-h-[430px] overflow-x-auto p-5 font-mono text-[12.5px] leading-[1.7] text-night-ink sm:text-[13px]"
         >
           <code aria-hidden>

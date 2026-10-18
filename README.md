@@ -123,22 +123,22 @@ Build the CLI locally:
 ```bash
 npm run cli:build
 node cli/dist/oqgit.mjs --help
-node cli/dist/oqgit.mjs get sharkdp/bat --dry-run
+node cli/dist/oqgit.mjs sharkdp/bat --dry-run
 ```
 
 Optionally install the built local package for the `oqgit` command:
 
 ```bash
 npm install -g ./cli
-oqgit get sharkdp/bat --dry-run
+oqgit sharkdp/bat --dry-run
 ```
 
-Run `oqgit` with no arguments in an interactive terminal for a menu. `oqgit owner/repo` also works as shorthand for `oqgit get owner/repo`.
+Run `oqgit` with no arguments in an interactive terminal for a menu. `oqgit owner/repo` is shorthand for `oqgit get owner/repo`. Write an OS and CPU after the repository to target another computer (`oqgit cli/cli windows arm64`; `mac`, `win`, `intel` and `amd64` work too), and add `@tag` for a specific release (`oqgit sharkdp/bat@v0.25.0`). `oqgit help` shows the everyday commands, and `oqgit help <command>` shows one command's options.
 
 | Command | Purpose |
 | --- | --- |
-| `oqgit get owner/repo` | Choose and download a file, with confirmation when interactive. |
-| `oqgit info owner/repo` | Show release details and all files with detected platform hints. |
+| `oqgit owner/repo [os] [cpu]` | Choose and download a file, with confirmation when interactive. Same as `oqgit get`. |
+| `oqgit info owner/repo [os] [cpu]` | Show release details and all files with detected platform hints. |
 | `oqgit list` | List tracked downloads. |
 | `oqgit outdated` | Check tracked repositories for newer stable releases. |
 | `oqgit update [owner/repo]` | Download available updates for tracked repositories. |
@@ -146,30 +146,33 @@ Run `oqgit` with no arguments in an interactive terminal for a menu. `oqgit owne
 | `oqgit doctor` | Show system information, token status, and GitHub API quota. |
 | `oqgit trust owner/repo` | Get a provenance report for the selected file. |
 | `oqgit malware owner/repo` | Check the selected file's hash against VirusTotal; `--local` scans a temp copy with ClamAV. |
-| `oqgit verify ./file -r owner/repo` | Hash a local file and find its matching published release asset, if any. |
+| `oqgit verify ./file owner/repo` | Hash a local file and find its matching published release asset, if any. |
 | `oqgit diff owner/repo [from] [to]` | Compare two releases' files, sizes, and platform coverage. |
-| `oqgit lock add owner/repo` | Pin assets for available OS and CPU combinations in `oqgit.lock.json`. |
+| `oqgit lock owner/repo` | Pin assets for available OS and CPU combinations in `oqgit.lock.json`. |
 | `oqgit lock show` | Show the current lockfile. |
 | `oqgit lock check` | Check pinned assets for changes or missing files. |
 | `oqgit lock update [owner/repo]` | Update lockfile entries to newer stable releases. |
 | `oqgit lock remove owner/repo` | Remove a repository from the lockfile. |
 | `oqgit sync` | Download this machine's locked assets. |
 | `oqgit mcp` | Run a Model Context Protocol server over standard input and output. |
+| `oqgit review [12 \| PR link]` | AI review of this branch, PR 12 in this repository, or any PR or branch link. |
+| `oqgit help [command]` | Show the everyday commands, or one command's options and examples. |
 
-Helpful flags include `--os`, `--arch`, `-t/--tag`, `-o/--out`, `-n/--dry-run`, `-y/--yes`, `-f/--force`, `--json`, `--min-age`, `--no-track`, `--no-trust`, `--no-malware`, and `--local`. Use `oqgit --help` for the complete list. In noninteractive mode, `get` requires `--yes` to download.
+Helpful flags include `--os`, `--arch`, `-t/--tag`, `-o/--out`, `-n/--dry-run`, `-y/--yes`, `-f/--force`, `--json`, `--min-age`, `--no-track`, `--no-trust`, `--no-malware`, and `--local`. Use `oqgit help all` for the complete list. In noninteractive mode, `get` requires `--yes` to download.
 
 Some examples:
 
 ```bash
-oqgit get sharkdp/bat --dry-run
-oqgit get sharkdp/bat --yes
-oqgit info neovim/neovim --os windows
-oqgit get sharkdp/bat --min-age 3d
+oqgit sharkdp/bat --dry-run
+oqgit sharkdp/bat --yes
+oqgit sharkdp/bat@v0.25.0
+oqgit info neovim/neovim windows
+oqgit sharkdp/bat --min-age 3d
 oqgit trust cli/cli --fail-under 60 --json
 oqgit malware cli/cli
 oqgit malware cli/cli --local
-oqgit verify ./downloaded-file -r owner/repo
-oqgit lock add cli/cli sharkdp/bat
+oqgit verify ./downloaded-file owner/repo
+oqgit lock cli/cli sharkdp/bat
 oqgit lock check
 oqgit sync
 ```
@@ -188,7 +191,7 @@ After a download completes, `get` checks the file for **known** malware: it look
 
 ### Lockfiles and agents
 
-`oqgit lock add` writes the selected file name, URL, size, and available GitHub digest for each supported platform combination. Commit `oqgit.lock.json` if you want teammates and CI to use the same release selection. `oqgit lock check` spots removed or changed files. `oqgit sync` saves locked downloads under `.oqgit/downloads/` and compares them to the digest saved in the lockfile when present. `--extract` optionally unpacks ZIP or TAR archives using the system's `unzip` or `tar`; inspect untrusted archives before extracting.
+`oqgit lock owner/repo` (or `oqgit lock add`) writes the selected file name, URL, size, and available GitHub digest for each supported platform combination. Commit `oqgit.lock.json` if you want teammates and CI to use the same release selection. `oqgit lock check` spots removed or changed files. `oqgit sync` saves locked downloads under `.oqgit/downloads/` and compares them to the digest saved in the lockfile when present. `--extract` optionally unpacks ZIP or TAR archives using the system's `unzip` or `tar`; inspect untrusted archives before extracting.
 
 `oqgit mcp` offers the tools `resolve_release`, `release_trust`, `check_malware`, `release_diff`, `verify_file`, and `lock_check`. It is read-only by default. Starting it with `--allow-download` also exposes `download_release`; weak-provenance files require an explicit `allow_weak` argument. The MCP server downloads files but never runs them.
 

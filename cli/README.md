@@ -34,29 +34,29 @@ The npm package is named `oqgit` in `cli/package.json`. Check whether it is publ
 ## Download your first file
 
 ```bash
-oqgit get sharkdp/bat --dry-run
-oqgit get sharkdp/bat
+oqgit sharkdp/bat --dry-run
+oqgit sharkdp/bat
 oqgit info sharkdp/bat
 ```
 
 `--dry-run` shows the proposed file without saving anything. Without it, `get` asks for confirmation in an interactive terminal. By default, the CLI detects your operating system, CPU, and relevant compatibility information. You can use a full GitHub repository URL or a release URL instead of `owner/repo`.
 
-Use `--os` and `--arch` to target another system, or `--tag` to select a specific release:
+To target another system, write its OS and CPU after the repository. To pick a specific release, add `@tag`:
 
 ```bash
-oqgit info cli/cli --os windows --arch arm64
-oqgit get sharkdp/bat --tag v0.25.0 --dry-run
+oqgit info cli/cli windows arm64
+oqgit sharkdp/bat@v0.25.0 --dry-run
 ```
 
-A tag is an example: specify a tag that exists in the chosen repository. Without a tag, `oqgit` looks for the latest stable release. If multiple files tie or no usable file can be identified, it refuses to recommend one.
+Everyday names work too: `mac`, `win`, `intel`, `amd64` or `aarch64`. The `--os`, `--arch` and `--tag` flags do the same thing. A tag is an example: specify a tag that exists in the chosen repository. Without a tag, `oqgit` looks for the latest stable release. If multiple files tie or no usable file can be identified, it refuses to recommend one.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `oqgit` | Open the interactive menu when run in a terminal. |
-| `oqgit get <target>` | Find, confirm, download, and optionally track a matching asset. |
-| `oqgit info <target>` | Show release information and matching file candidates. |
+| `oqgit get <target> [os] [cpu]` | Find, confirm, download, and optionally track a matching asset. |
+| `oqgit info <target> [os] [cpu]` | Show release information and matching file candidates. |
 | `oqgit list` | List locally tracked downloads. |
 | `oqgit outdated` | Check for newer stable versions of tracked tools. |
 | `oqgit update [owner/repo]` | Download a newer stable version of one or more tracked tools. |
@@ -64,9 +64,9 @@ A tag is an example: specify a tag that exists in the chosen repository. Without
 | `oqgit doctor` | Show platform detection, local directories, token status, and API quota. |
 | `oqgit trust <target>` | Explain provenance signals for a release file. |
 | `oqgit malware <target>` | Check the selected file's hash against VirusTotal; `--local` scans a temp copy with ClamAV. |
-| `oqgit verify <file> -r owner/repo` | Hash a local file and look for its exact digest in a repository's releases. |
+| `oqgit verify <file> [owner/repo]` | Hash a local file and look for its exact digest in a repository's releases. |
 | `oqgit diff <repo> [from] [to]` | Compare assets and platform coverage across two releases. |
-| `oqgit lock add <target...>` | Add repository releases and matching platform assets to `oqgit.lock.json`. |
+| `oqgit lock <target...>` | Add repository releases and matching platform assets to `oqgit.lock.json`. |
 | `oqgit lock show` | Show the lockfile contents. |
 | `oqgit lock check` | Check whether locked release assets changed, disappeared, or lost digests. |
 | `oqgit lock update [repo]` | Refresh one or more locked repositories. |
@@ -74,7 +74,9 @@ A tag is an example: specify a tag that exists in the chosen repository. Without
 | `oqgit sync [--extract]` | Download the locked file for this computer, optionally extracting archives. |
 | `oqgit mcp [--allow-download]` | Start an MCP server over standard input and output. |
 
-`<target>` accepts a GitHub repository or release URL, or `owner/repo`. Run `oqgit --help` for flags and more examples. Running `oqgit owner/repo` is shorthand for `oqgit get owner/repo`.
+`<target>` accepts a GitHub repository or release URL, or `owner/repo`. Running `oqgit owner/repo` is shorthand for `oqgit get owner/repo`.
+
+`oqgit help` shows the everyday commands. `oqgit help <command>` (or `oqgit <command> --help`) shows that command's options and examples, and `oqgit help all` lists every command and flag. A few other names also work: `download` and `dl` for `get`, `show` for `info`, `ls` for `list`, `check` for `outdated`, `upgrade` for `update`, and `remove` and `rm` for `forget`. If you mistype a command, oqgit suggests the closest one.
 
 Common options include `--os`, `--arch`, `--tag`, `--out`, `--yes`, `--dry-run`, `--force`, `--no-track`, `--json`, `--min-age`, `--no-trust`, `--no-malware`, `--local`, and `--open`. The `--open` flag asks the operating system to open the downloaded file, which might launch an installer; use it only for files you trust.
 
@@ -84,8 +86,8 @@ Exit codes are `0` for success, `1` for an error, `2` for invalid input, `3` for
 
 ```bash
 oqgit trust cli/cli --fail-under 60
-oqgit verify ./downloaded-file -r owner/repo
-oqgit get sharkdp/bat --min-age 3d --dry-run
+oqgit verify ./downloaded-file owner/repo
+oqgit sharkdp/bat --min-age 3d --dry-run
 ```
 
 `trust` produces a report from available GitHub information, including release age, published digests, attestations, immutable-release status, and changes to published files. It is a set of signals, not a verified signature verdict — run `oqgit malware` for known-malware evidence. When GitHub lists an attestation, `oqgit` can show a `gh attestation verify` command for a separate cryptographic verification.
@@ -103,7 +105,7 @@ Downloads go first to a temporary `.part` file. The CLI checks the expected size
 ## Lockfiles for teams
 
 ```bash
-oqgit lock add sharkdp/bat cli/cli
+oqgit lock sharkdp/bat cli/cli
 oqgit lock show
 oqgit lock check
 oqgit sync
@@ -123,6 +125,7 @@ export GEMINI_API_KEY=...   # free key: https://aistudio.google.com/apikey
 oqgit review                                         # this branch (and uncommitted changes) vs. origin's default branch
 oqgit review --base develop --goal "retry failed uploads"
 oqgit review https://github.com/owner/repo/pull/12   # any PR: draft, open, closed
+oqgit review 12                                      # PR 12 in this repo
 oqgit review owner/repo#12
 oqgit review https://github.com/owner/repo/tree/my-branch
 oqgit review https://github.com/owner/repo/compare/main...my-branch

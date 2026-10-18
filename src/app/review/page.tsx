@@ -73,7 +73,7 @@ export default function ReviewPage() {
           <div className="min-w-0 lg:pt-4">
             <PrReviewer />
             <p className="mt-4 px-2 font-mono text-[11px] uppercase tracking-[0.13em] text-ink-subtle">
-              In a terminal, for private repos and local branches: oqgit review
+              In a terminal, for private repos and local branches: oqgit review (or oqgit review 12 for a PR)
             </p>
           </div>
         </div>

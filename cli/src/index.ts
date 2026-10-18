@@ -22,7 +22,7 @@ import { parseGitHubUrl } from "../../src/core/parse-url";
 import { lockPath, readLock, readLockOrEmpty, sha256File, syncOne, writeLock } from "./lock";
 import { startMcpServer } from "./mcp";
 import { copyToClipboard, makeExecutable, openFile, revealFile } from "./open";
-import { GitError, localContext } from "./git";
+import { GitError, localContext, originRepo } from "./git";
 import { GemmaReviewer, GitHubPrClient, ModelQuotaError, SEVERITY_LABELS, parseReviewTarget, reviewChange, type ReviewResult, type Severity } from "../../src/core/review";
 import { loadInputLimit, loadState, saveInputLimit, stateDir, track, untrack } from "./state";
 import { detectSystem, type SystemInfo } from "./system";
@@ -110,12 +110,208 @@ type Flags = {
   version?: boolean;
 };
 
+/** Extra names people reach for, mapped to the real command. */
+const ALIASES: Record<string, string> = {
+  download: "get",
+  dl: "get",
+  show: "info",
+  ls: "list",
+  check: "outdated",
+  upgrade: "update",
+  remove: "forget",
+  scan: "malware",
+  rm: "forget",
+};
+
 const COMMANDS = [
-  "get", "info", "list", "ls", "outdated", "update", "upgrade", "forget", "rm", "doctor", "help",
+  "get", "info", "list", "outdated", "update", "forget", "doctor", "help",
   "trust", "malware", "diff", "verify", "lock", "sync", "mcp", "review",
 ] as const;
 
+interface CommandHelp {
+  usage: string;
+  about: string;
+  flags?: Array<[string, string]>;
+  examples: string[];
+}
+
+const PLATFORM_FLAGS: Array<[string, string]> = [
+  ["<os> <cpu>", "another computer: windows, mac, linux · x64, arm64, x86"],
+  ["<repo>@<tag>", "an older release instead of the latest stable one"],
+];
+
+const COMMAND_HELP: Record<string, CommandHelp> = {
+  get: {
+    usage: "oqgit get <repo> [os] [cpu]",
+    about: "Find the right file for this computer in the latest release and download it.\nYou can skip the word `get`: `oqgit <repo>` does the same thing.",
+    flags: [
+      ...PLATFORM_FLAGS,
+      ["-o, --out <dir>", "where to save (default: ~/Downloads)"],
+      ["-y, --yes", "don't ask before downloading"],
+      ["-n, --dry-run", "show the file it would pick, download nothing"],
+      ["-f, --force", "overwrite a file that's already there"],
+      ["--open", "open the file when done (only for files you trust)"],
+      ["--no-track", "don't remember this download for `oqgit update`"],
+      ["--no-malware", "skip the malware check on the downloaded file"],
+      ["--min-age <3d|72h|1w>", "skip releases newer than this"],
+      ["--json", "machine-readable output"],
+    ],
+    examples: ["oqgit sharkdp/bat", "oqgit sharkdp/bat windows arm64", "oqgit sharkdp/bat@v0.25.0", "oqgit get https://github.com/cli/cli -y", "oqgit sharkdp/bat -n"],
+  },
+  info: {
+    usage: "oqgit info <repo> [os] [cpu]",
+    about: "Show the latest release and every file in it, marking the one that fits this computer.",
+    flags: [...PLATFORM_FLAGS, ["--json", "machine-readable output"]],
+    examples: ["oqgit info neovim/neovim", "oqgit info cli/cli windows"],
+  },
+  list: {
+    usage: "oqgit list",
+    about: "Show the files oqgit has downloaded for you.",
+    flags: [["--json", "machine-readable output"]],
+    examples: ["oqgit list"],
+  },
+  outdated: {
+    usage: "oqgit outdated",
+    about: "Check whether anything you downloaded has a newer stable release. Nothing is downloaded.",
+    flags: [["--min-age <3d|72h|1w>", "ignore releases newer than this"], ["--json", "machine-readable output"]],
+    examples: ["oqgit outdated"],
+  },
+  update: {
+    usage: "oqgit update [repo]",
+    about: "Download newer versions of the files you've downloaded before: all of them, or just one repo.",
+    flags: [
+      ["-y, --yes", "update everything without asking"],
+      ["--min-age <3d|72h|1w>", "skip releases newer than this"],
+    ],
+    examples: ["oqgit update", "oqgit update sharkdp/bat"],
+  },
+  forget: {
+    usage: "oqgit forget <repo>",
+    about: "Stop tracking a repo for updates. Files you downloaded stay where they are.",
+    examples: ["oqgit forget sharkdp/bat"],
+  },
+  doctor: {
+    usage: "oqgit doctor",
+    about: "Show what oqgit detected about this computer, where it saves files, and your GitHub API quota.",
+    flags: [["--json", "machine-readable output"]],
+    examples: ["oqgit doctor"],
+  },
+  trust: {
+    usage: "oqgit trust <repo> [os] [cpu]",
+    about: "Explain how much you can trust the file oqgit would pick: release age, published digests,\nattestations and re-uploads. These are signals, not a malware scan.",
+    flags: [...PLATFORM_FLAGS, ["--fail-under <0-100>", "exit with code 4 when the score is lower (for CI)"], ["--json", "machine-readable output"]],
+    examples: ["oqgit trust cli/cli", "oqgit trust cli/cli --fail-under 60"],
+  },
+  malware: {
+    usage: "oqgit malware <repo> [os] [cpu]",
+    about: "Look up the file oqgit would pick in VirusTotal by its hash. Only the hash leaves your computer.\nWith --local, download a temp copy and scan it with ClamAV. A clean result is not a guarantee.\nSet VIRUSTOTAL_API_KEY for hash lookups.",
+    flags: [...PLATFORM_FLAGS, ["--local", "scan a temp copy with ClamAV on this computer"], ["--json", "machine-readable output"]],
+    examples: ["oqgit malware sharkdp/bat", "oqgit scan cli/cli windows --local"],
+  },
+  verify: {
+    usage: "oqgit verify <file> [repo]",
+    about: "Check that a file on your disk really came from a repo's releases. The repo is optional\nfor files oqgit downloaded.",
+    flags: [["-r, --repo <owner/repo>", "the repo the file should come from"], ["--json", "machine-readable output"]],
+    examples: ["oqgit verify ~/Downloads/bat.tar.gz sharkdp/bat"],
+  },
+  diff: {
+    usage: "oqgit diff <repo> [from] [to]",
+    about: "Compare the files in two releases. Without tags, compares the latest stable release with the one before it.",
+    flags: [["--json", "machine-readable output"]],
+    examples: ["oqgit diff cli/cli", "oqgit diff cli/cli v2.60.0 v2.61.0"],
+  },
+  review: {
+    usage: "oqgit review [pr]",
+    about: "AI code review with Gemma 4. With nothing after it, reviews this branch's changes.\nGive a PR number for this repo, owner/repo#12, or any PR, branch or compare link.\nNeeds GEMINI_API_KEY (free key: https://aistudio.google.com/apikey).",
+    flags: [
+      ["-g, --goal <text>", "what the change is meant to do"],
+      ["--fast", "much quicker, less thorough"],
+      ["--copy", "copy the fix prompt to the clipboard"],
+      ["--base <branch>", "branch to compare against"],
+      ["--head <branch>", "branch to review (with owner/repo)"],
+      ["--pr <number>", "PR number (with owner/repo)"],
+      ["--model <id>", "model to use (default gemma-4-31b-it)"],
+      ["--prompt-only", "print only the fix prompt"],
+      ["--strict", "exit with code 4 unless safe to merge (for CI)"],
+      ["--json", "machine-readable output"],
+    ],
+    examples: ["oqgit review", "oqgit review 12", "oqgit review owner/repo#12", "oqgit review --goal \"retry failed uploads\" --fast"],
+  },
+  lock: {
+    usage: "oqgit lock [repo…] | lock <show|check|update|remove>",
+    about: `Pin tools for your team in ${LOCKFILE_NAME}, then everyone runs \`oqgit sync\`.\n\`oqgit lock owner/repo\` adds a repo; \`oqgit lock\` on its own shows the lockfile.`,
+    flags: [["-t, --tag <tag>", "lock this release (one repo at a time)"], ["--lock <file>", `lockfile path (default ./${LOCKFILE_NAME})`], ["--json", "machine-readable output"]],
+    examples: ["oqgit lock cli/cli sharkdp/bat", "oqgit lock check", "oqgit lock update"],
+  },
+  sync: {
+    usage: "oqgit sync",
+    about: `Download this computer's files from ${LOCKFILE_NAME} into .oqgit/, checked against the lock.`,
+    flags: [["--extract", "unpack archives into .oqgit/tools/"], ["--lock <file>", "lockfile path"], ["--json", "machine-readable output"]],
+    examples: ["oqgit sync", "oqgit sync --extract"],
+  },
+  mcp: {
+    usage: "oqgit mcp",
+    about: "Run as an MCP server so coding agents can use oqgit.",
+    flags: [["--allow-download", "let agents download files"]],
+    examples: ["claude mcp add oqgit -- oqgit mcp"],
+  },
+};
+
+function commandHelp(name: string): string {
+  const h = COMMAND_HELP[name];
+  const aliases = Object.entries(ALIASES).filter(([, to]) => to === name).map(([a]) => a);
+  const width = Math.max(0, ...(h.flags ?? []).map(([f]) => f.length)) + 3;
+  return [
+    "",
+    `${c.bold("Usage")}  ${c.accent(h.usage)}`,
+    "",
+    ...h.about.split("\n").map((l) => `  ${l}`),
+    ...(aliases.length ? ["", c.dim(`  Also: ${aliases.map((a) => `oqgit ${a}`).join(", ")}`)] : []),
+    ...(h.flags?.length ? ["", c.bold("Options"), ...h.flags.map(([f, d]) => `  ${c.info(f.padEnd(width))}${c.dim(d)}`)] : []),
+    "",
+    c.bold("Examples"),
+    ...h.examples.map((e) => `  ${c.dim("$")} ${e}`),
+    "",
+  ].join("\n");
+}
+
+/** The short help: just what most people need. */
 function help(): string {
+  const cmd = (name: string, args: string, desc: string) => `  ${c.accent(name.padEnd(9))}${args.padEnd(12)}${c.dim(desc)}`;
+  return [
+    banner(VERSION),
+    `${c.bold("Usage")}  oqgit ${c.dim("<repo>")}              download the right file for this computer`,
+    `       oqgit ${c.dim("<command> [repo]")}`,
+    "",
+    c.dim("  <repo> is owner/repo or any GitHub link, e.g. sharkdp/bat"),
+    "",
+    c.bold("Commands"),
+    cmd("get", "<repo>", "download the right file (same as just `oqgit <repo>`)"),
+    cmd("info", "<repo>", "see every file in the latest release"),
+    cmd("list", "", "what you've downloaded"),
+    cmd("update", "", "get newer versions of what you've downloaded"),
+    cmd("trust", "<repo>", "how much can you trust this release?"),
+    cmd("review", "[pr]", "AI code review of a pull request or this branch"),
+    "",
+    c.bold("More"),
+    `  ${c.accent("malware  outdated  verify  diff  forget  lock  sync  mcp  doctor")}`,
+    "",
+    c.bold("Examples"),
+    `  ${c.dim("$")} oqgit sharkdp/bat                ${c.dim("download for this computer")}`,
+    `  ${c.dim("$")} oqgit sharkdp/bat windows arm64  ${c.dim("download for another computer")}`,
+    `  ${c.dim("$")} oqgit sharkdp/bat@v0.25.0        ${c.dim("download an older release")}`,
+    `  ${c.dim("$")} oqgit update                     ${c.dim("update everything you downloaded")}`,
+    `  ${c.dim("$")} oqgit review 12                  ${c.dim("review pull request 12 in this repo")}`,
+    "",
+    c.dim(`Run ${c.info("oqgit help <command>")} for a command's options, or ${c.info("oqgit help all")} for everything.`),
+    c.dim("Just type `oqgit` for a menu. oqgit only downloads; it never installs or runs anything."),
+    "",
+  ].join("\n");
+}
+
+/** Every command and flag on one page (`oqgit help all`). */
+function fullHelp(): string {
+
   const cmd = (name: string, args: string, desc: string) => `  ${c.accent(name.padEnd(9))}${args.padEnd(22)}${c.dim(desc)}`;
   const flag = (name: string, desc: string) => `  ${c.info(name.padEnd(31))}${c.dim(desc)}`;
   return [
@@ -124,7 +320,7 @@ function help(): string {
     `        oqgit ${c.dim("<github url | owner/repo>")}    ${c.dim("same as `get`")}`,
     "",
     c.bold("Commands"),
-    cmd("get", "<target>", "find and download the right file for this machine"),
+    cmd("get", "<target> [os] [cpu]", "find and download the right file for this machine"),
     cmd("info", "<target>", "show the release and every file, with what fits"),
     cmd("list", "", "files oqgit has downloaded"),
     cmd("outdated", "", "check tracked downloads for newer stable releases"),
@@ -135,25 +331,25 @@ function help(): string {
     c.bold("Supply chain"),
     cmd("trust", "<target>", "provenance report: attestations, immutability, re-uploads, age"),
     cmd("malware", "<target>", "known-malware check: VirusTotal hash lookup, --local for ClamAV"),
-    cmd("verify", "<file> -r <repo>", "is this file on disk really from that repo's releases?"),
+    cmd("verify", "<file> [repo]", "is this file on disk really from that repo's releases?"),
     cmd("diff", "<repo> [from] [to]", "what changed between two releases' files"),
     "",
     c.bold("Code review (Gemma 4)"),
     cmd("review", "", "review this branch's changes against its base"),
-    cmd("review", "<pr url | o/r#12>", "review a pull request: draft, open or any state"),
+    cmd("review", "<12 | o/r#12 | url>", "review a pull request: draft, open or any state"),
     cmd("review", "<branch/compare url>", "review a pushed branch against the default branch"),
     "",
     c.bold("Teams, CI and agents"),
-    cmd("lock", "add <target…>", `pin binaries for every platform in ${LOCKFILE_NAME}`),
+    cmd("lock", "<target…>", `pin binaries for every platform in ${LOCKFILE_NAME}`),
     cmd("lock", "check", "fail if a locked file was re-uploaded or removed (CI)"),
     cmd("lock", "update [repo]", "move locked tools to their latest stable release"),
     cmd("sync", "", "download this machine's locked files, verified against the lock"),
     cmd("mcp", "", "run as an MCP server so coding agents can use oqgit"),
     "",
     c.bold("Flags"),
-    flag("--os <windows|macos|linux>", "target another OS"),
-    flag("--arch <x64|arm64|x86>", "target another CPU"),
-    flag("-t, --tag <tag>", "use a specific release instead of latest stable"),
+    flag("--os <windows|macos|linux>", "target another OS (or just write it after the repo)"),
+    flag("--arch <x64|arm64|x86>", "target another CPU (or just write it after the repo)"),
+    flag("-t, --tag <tag>", "use a specific release (or write owner/repo@tag)"),
     flag("-o, --out <dir>", "where to save (default: ~/Downloads)"),
     flag("-y, --yes", "don't ask before downloading"),
     flag("-n, --dry-run", "resolve only; never download"),
@@ -165,7 +361,7 @@ function help(): string {
     flag("--no-malware", "get: skip the malware check on the downloaded file"),
     flag("--local", "malware: download to a temp folder and scan with local ClamAV"),
     flag("--fail-under <0-100>", "trust: exit 4 when the score is lower"),
-    flag("-r, --repo <owner/repo>", "verify: the repo the file should come from"),
+    flag("-r, --repo <owner/repo>", "verify: the repo the file should come from (or pass it after the file)"),
     flag(`--lock <file>`, `lockfile path (default ./${LOCKFILE_NAME})`),
     flag("--extract", "sync: unpack archives into .oqgit/tools/"),
     flag("--allow-download", "mcp: expose the download_release tool"),
@@ -181,12 +377,12 @@ function help(): string {
     "",
     c.bold("Examples"),
     `  ${c.dim("$")} oqgit sharkdp/bat`,
-    `  ${c.dim("$")} oqgit get https://github.com/cli/cli --arch arm64 -y`,
-    `  ${c.dim("$")} oqgit info neovim/neovim --os windows`,
+    `  ${c.dim("$")} oqgit get https://github.com/cli/cli arm64 -y`,
+    `  ${c.dim("$")} oqgit info neovim/neovim windows`,
     `  ${c.dim("$")} oqgit outdated`,
     `  ${c.dim("$")} oqgit trust cli/cli --fail-under 60`,
     `  ${c.dim("$")} oqgit get sharkdp/bat --min-age 3d`,
-    `  ${c.dim("$")} oqgit lock add cli/cli sharkdp/bat && oqgit sync`,
+    `  ${c.dim("$")} oqgit lock cli/cli sharkdp/bat && oqgit sync`,
     `  ${c.dim("$")} claude mcp add oqgit -- oqgit mcp`,
     `  ${c.dim("$")} oqgit review https://github.com/owner/repo/pull/12`,
     `  ${c.dim("$")} oqgit review --goal "add retry to uploads" --copy`,
@@ -236,7 +432,42 @@ function platformText(pl: Platform): string {
   return `${OS_LABELS[pl.os]} · ${archLabel(pl.os, pl.arch)}`;
 }
 
+/** Everyday names for each OS and CPU, so `mac`, `win` or `intel` work too. */
+const OS_WORDS: Record<string, Os> = {
+  windows: "windows", win: "windows", win32: "windows", win64: "windows",
+  macos: "macos", mac: "macos", osx: "macos", darwin: "macos", apple: "macos",
+  linux: "linux",
+};
+const ARCH_WORDS: Record<string, Arch> = {
+  x64: "x64", amd64: "x64", x86_64: "x64", intel: "x64", "64bit": "x64",
+  arm64: "arm64", aarch64: "arm64", arm: "arm64", m1: "arm64", m2: "arm64", m3: "arm64", m4: "arm64",
+  x86: "x86", i386: "x86", i686: "x86", "32bit": "x86",
+};
+
+/**
+ * Read the words after a repo in `get`, `info` and `trust`: an OS, a CPU, or a release tag,
+ * plus `owner/repo@tag`. `oqgit get cli/cli windows arm64` = `--os windows --arch arm64`.
+ */
+function targetArgs(command: string, target: string | undefined, extra: string[], flags: Flags): [string | undefined, Flags] {
+  const out = { ...flags };
+  const at = target && !/^(?:https?:\/\/|(?:www\.)?github\.com\/)/i.test(target) ? /^([^@\s]+)@([^@\s]+)$/.exec(target) : null;
+  if (at) {
+    target = at[1];
+    out.tag ??= at[2];
+  }
+  for (const word of extra) {
+    const w = word.toLowerCase();
+    if (OS_WORDS[w] && !flags.os) out.os = OS_WORDS[w];
+    else if (ARCH_WORDS[w] && !flags.arch) out.arch = ARCH_WORDS[w];
+    else if (/^v?\d/.test(word) && !out.tag) out.tag = word;
+    else throw new UsageError(`Didn't understand “${word}”. Try: oqgit ${command} owner/repo mac arm64  (or  owner/repo@v1.2.3)`);
+  }
+  return [target, out];
+}
+
 function resolvePlatform(flags: Flags, sys: SystemInfo): Platform {
+  if (flags.os) flags = { ...flags, os: OS_WORDS[flags.os.toLowerCase()] ?? flags.os };
+  if (flags.arch) flags = { ...flags, arch: ARCH_WORDS[flags.arch.toLowerCase()] ?? flags.arch };
   const osValue = (flags.os ?? sys.os) as Os | null;
   const archValue = (flags.arch ?? sys.arch) as Arch | null;
   if (flags.os && !OS_VALUES.includes(flags.os as Os)) throw new UsageError(`--os must be one of: ${OS_VALUES.join(", ")}`);
@@ -288,6 +519,18 @@ function exitOnCancel<T>(value: T): Exclude<T, symbol> {
   return value as Exclude<T, symbol>;
 }
 
+/** Ask for a repo in a terminal; otherwise explain how to pass one. */
+async function askRepo(command: string, flags: Flags): Promise<string> {
+  if (!isTTY || flags.json) throw new UsageError(`Which repo? Try: oqgit ${command} owner/repo`);
+  return exitOnCancel(
+    await p.text({
+      message: "GitHub repo or link",
+      placeholder: "owner/repo  or  https://github.com/owner/repo",
+      validate: (v) => (v?.trim() ? undefined : "Type owner/repo or paste a link"),
+    }),
+  ).trim();
+}
+
 function header(command: string) {
   p.intro(`${gradient("◆ oqgit")} ${c.dim(command)}`);
 }
@@ -303,7 +546,7 @@ interface GetOptions {
 async function cmdGet(target: string | undefined, flags: Flags, opts: GetOptions = {}): Promise<number> {
   const interactive = isTTY && !flags.json;
   if (!target) {
-    if (!interactive) throw new UsageError("Give a GitHub URL or owner/repo. Try `oqgit --help`.");
+    if (!interactive) throw new UsageError("Which repo? Try: oqgit get owner/repo");
     target = exitOnCancel(
       await p.text({
         message: "GitHub repository or release URL",
@@ -617,7 +860,7 @@ async function finishDownload(
 // ---------------------------------------------------------------------------
 
 async function cmdInfo(target: string | undefined, flags: Flags): Promise<number> {
-  if (!target) throw new UsageError("Usage: oqgit info <github url | owner/repo>");
+  target ??= await askRepo("info", flags);
   const sys = detectSystem();
   const platform = resolvePlatform(flags, sys);
   const prefs = platform.os === sys.os ? { linuxPackage: sys.linuxPackage } : {};
@@ -833,7 +1076,7 @@ async function cmdUpdate(target: string | undefined, flags: Flags): Promise<numb
 }
 
 async function cmdForget(target: string | undefined): Promise<number> {
-  if (!target) throw new UsageError("Usage: oqgit forget <owner/repo>");
+  if (!target) throw new UsageError("Which repo? Try: oqgit forget owner/repo");
   const repo = target.replace(/^(?:https?:\/\/)?(?:www\.)?github\.com\//i, "").split("/").slice(0, 2).join("/");
   const n = await untrack(repo);
   console.log(n ? `${c.ok("✔")} Stopped tracking ${repo}. Files on disk were left alone.` : c.dim(`${repo} wasn't tracked.`));
@@ -890,7 +1133,7 @@ async function cmdDoctor(flags: Flags): Promise<number> {
 // ---------------------------------------------------------------------------
 
 async function cmdTrust(target: string | undefined, flags: Flags): Promise<number> {
-  if (!target) throw new UsageError("Usage: oqgit trust <github url | owner/repo>");
+  target ??= await askRepo("trust", flags);
   const failUnder = flags["fail-under"] !== undefined ? Number(flags["fail-under"]) : undefined;
   if (failUnder !== undefined && !(failUnder >= 0 && failUnder <= 100)) throw new UsageError("--fail-under must be 0–100.");
   const sys = detectSystem();
@@ -964,7 +1207,7 @@ function meter(score: number): string {
 // ---------------------------------------------------------------------------
 
 async function cmdMalware(target: string | undefined, flags: Flags): Promise<number> {
-  if (!target) throw new UsageError("Usage: oqgit malware <github url | owner/repo>");
+  target ??= await askRepo("malware", flags);
   const sys = detectSystem();
   const platform = resolvePlatform(flags, sys);
   const prefs = platform.os === sys.os ? { linuxPackage: sys.linuxPackage } : {};
@@ -1055,7 +1298,7 @@ async function cmdMalware(target: string | undefined, flags: Flags): Promise<num
 // ---------------------------------------------------------------------------
 
 async function cmdDiff(target: string | undefined, fromTag: string | undefined, toTag: string | undefined, flags: Flags): Promise<number> {
-  if (!target) throw new UsageError("Usage: oqgit diff <owner/repo> [from-tag] [to-tag]");
+  if (!target) throw new UsageError("Which repo? Try: oqgit diff owner/repo");
   const t = repoOf(target);
   const spin = isTTY && !flags.json ? p.spinner() : null;
   if (spin) header("diff");
@@ -1107,13 +1350,13 @@ async function cmdDiff(target: string | undefined, fromTag: string | undefined, 
 // ---------------------------------------------------------------------------
 
 async function cmdVerify(file: string | undefined, flags: Flags): Promise<number> {
-  if (!file) throw new UsageError("Usage: oqgit verify <file> --repo <owner/repo>");
+  if (!file) throw new UsageError("Which file? Try: oqgit verify ./file owner/repo");
   const full = path.resolve(file);
   if (!existsSync(full)) throw new UsageError(`No such file: ${file}`);
   let repo = flags.repo;
   if (!repo) {
     const tracked = (await loadState()).downloads.find((d) => path.resolve(d.path) === full);
-    if (!tracked) throw new UsageError("Pass --repo <owner/repo>: which project should this file come from?");
+    if (!tracked) throw new UsageError(`Which repo should this file come from? Try: oqgit verify ${file} owner/repo`);
     repo = tracked.repo;
   }
   const t = repoOf(repo);
@@ -1185,7 +1428,7 @@ async function cmdLock(sub: string | undefined, targets: string[], flags: Flags)
       return EXIT.ok;
     }
     if (!lock || !Object.keys(lock.tools).length) {
-      console.log(c.dim(`No ${LOCKFILE_NAME} here yet. Start one: ${c.info("oqgit lock add owner/repo")}`));
+      console.log(c.dim(`No ${LOCKFILE_NAME} here yet. Start one: ${c.info("oqgit lock owner/repo")}`));
       return EXIT.ok;
     }
     console.log(
@@ -1207,10 +1450,13 @@ async function cmdLock(sub: string | undefined, targets: string[], flags: Flags)
     return EXIT.ok;
   }
 
+  // `oqgit lock owner/repo` is short for `oqgit lock add owner/repo`.
+  if (sub && sub.includes("/")) [sub, targets] = ["add", [sub, ...targets]];
+
   if (sub === "add" || sub === "update") {
     const lock = await readLockOrEmpty(file);
     const list = sub === "add" ? targets : targets.length ? targets : Object.keys(lock.tools);
-    if (!list.length) throw new UsageError(sub === "add" ? "Usage: oqgit lock add <owner/repo> [more…] [-t tag]" : "Nothing locked yet.");
+    if (!list.length) throw new UsageError(sub === "add" ? "Which repo? Try: oqgit lock owner/repo" : "Nothing locked yet.");
     if (flags.tag && list.length > 1) throw new UsageError("--tag works with one repo at a time.");
     const minAge = minAgeMs(flags);
     for (const raw of list) {
@@ -1286,7 +1532,7 @@ async function cmdLock(sub: string | undefined, targets: string[], flags: Flags)
 async function cmdSync(flags: Flags): Promise<number> {
   const file = lockPath(flags.lock);
   const lock = await readLock(file);
-  if (!lock) throw new UsageError(`No ${LOCKFILE_NAME} at ${tildify(file)}. Create one with oqgit lock add owner/repo.`);
+  if (!lock) throw new UsageError(`No ${LOCKFILE_NAME} at ${tildify(file)}. Create one with oqgit lock owner/repo.`);
   const sys = detectSystem();
   const platform = resolvePlatform(flags, sys);
   const key = platformKey(platform);
@@ -1365,6 +1611,14 @@ async function cmdReview(target: string | undefined, flags: Flags): Promise<numb
 
   if (interactive) header("review");
   const spin = interactive ? p.spinner() : null;
+
+  // `oqgit review 12` (or `#12`): pull request 12 in this checkout's GitHub repo.
+  const prNumber = target && /^#?(\d{1,9})$/.exec(target);
+  if (prNumber) {
+    const repo = await originRepo(process.cwd());
+    if (!repo) throw new UsageError(`Couldn't tell which GitHub repo this is. Try: oqgit review owner/repo#${prNumber[1]}`);
+    target = `${repo}#${prNumber[1]}`;
+  }
 
   let ctx;
   try {
@@ -1563,6 +1817,28 @@ async function menu(flags: Flags): Promise<number> {
 // Entry
 // ---------------------------------------------------------------------------
 
+/** " Did you mean `oqgit get`?" for a near-miss command name, or "". */
+function suggest(input: string): string {
+  const names = [...COMMANDS, ...Object.keys(ALIASES)];
+  let best = "";
+  let bestDist = 3;
+  for (const name of names) {
+    const d = editDistance(input.toLowerCase(), name);
+    if (d < bestDist) [best, bestDist] = [name, d];
+  }
+  return best ? ` Did you mean ${c.info(`oqgit ${best}`)}?` : "";
+}
+
+function editDistance(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
 function report(err: unknown) {
   if (err instanceof UsageError) {
     console.error(`${c.bad("✖")} ${err.message}`);
@@ -1592,40 +1868,44 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     console.log(VERSION);
     return EXIT.ok;
   }
-  if (flags.help || first === "help") {
-    console.log(help());
+  const named = first && (ALIASES[first] ?? first);
+  if (named === "help" || flags.help) {
+    const topic = named === "help" ? second && (ALIASES[second] ?? second) : named;
+    if (topic === "all") console.log(fullHelp());
+    else if (topic && COMMAND_HELP[topic]) console.log(commandHelp(topic));
+    else if (topic && named === "help") {
+      report(new UsageError(`No command called “${second}”.${suggest(second!) || " Run oqgit help."}`));
+      return EXIT.usage;
+    } else console.log(help());
     return EXIT.ok;
   }
 
   try {
     if (!first) return isTTY && !flags.json ? await menu(flags) : (console.log(help()), EXIT.ok);
-    const command = (COMMANDS as readonly string[]).includes(first) ? first : null;
+    const command = (COMMANDS as readonly string[]).includes(named) ? named : null;
     switch (command) {
       case "get":
-        return await cmdGet(second, flags);
+        return await cmdGet(...targetArgs("get", second, rest, flags));
       case "info":
-        return await cmdInfo(second, flags);
+        return await cmdInfo(...targetArgs("info", second, rest, flags));
       case "list":
-      case "ls":
         return await cmdList(flags);
       case "outdated":
         return await cmdOutdated(flags);
       case "update":
-      case "upgrade":
         return await cmdUpdate(second, flags);
       case "forget":
-      case "rm":
         return await cmdForget(second);
       case "doctor":
         return await cmdDoctor(flags);
       case "trust":
-        return await cmdTrust(second, flags);
+        return await cmdTrust(...targetArgs("trust", second, rest, flags));
       case "malware":
-        return await cmdMalware(second, flags);
+        return await cmdMalware(...targetArgs("malware", second, rest, flags));
       case "diff":
         return await cmdDiff(second, rest[0], rest[1], flags);
       case "verify":
-        return await cmdVerify(second, flags);
+        return await cmdVerify(second, { ...flags, repo: flags.repo ?? rest[0] });
       case "lock":
         return await cmdLock(second, rest, flags);
       case "sync":
@@ -1644,8 +1924,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         return EXIT.ok;
       default:
         // `oqgit <url>` shorthand for `get`
-        if (/github\.com\/|^[\w.-]+\/[\w.-]+$/.test(first)) return await cmdGet(first, flags);
-        throw new UsageError(`Unknown command “${first}”. Run oqgit --help.`);
+        if (/github\.com\/|^[\w.-]+\/[\w.-]+(?:@\S+)?$/.test(first)) return await cmdGet(...targetArgs("get", first, [second, ...rest].filter(Boolean), flags));
+        throw new UsageError(`Unknown command “${first}”.${suggest(first) || " Run oqgit help."}`);
     }
   } catch (err) {
     if (err instanceof CancelledError) return EXIT.ok;

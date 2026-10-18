@@ -21,6 +21,11 @@ export function repoFromRemote(remote: string): string | null {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
+/** "owner/repo" of this checkout's GitHub `origin` remote, or null. */
+export async function originRepo(cwd: string): Promise<string | null> {
+  return repoFromRemote(await tryGit(["remote", "get-url", "origin"], cwd));
+}
+
 /** Split `git diff` output into per-file patches. */
 export function splitDiff(diff: string): Map<string, string> {
   const out = new Map<string, string>();
