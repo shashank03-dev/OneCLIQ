@@ -303,6 +303,7 @@ The version is installable once it's approved. Check with `npm view onecliq vers
 - API inputs are validated and size-limited, and GitHub API paths are built only from validated values.
 - Downloads must be HTTPS GitHub release links. The CLI checks every redirect against GitHub's asset hosts.
 - Tokens and API keys stay on the server (or your machine, for the CLI). They never reach the browser, and `/api/health` never reveals them.
+- **The web app only ever serves public repositories.** Before reading any release data, the server checks the repository's visibility and treats private ones as not found. This holds even when `GITHUB_TOKEN` can read private repos. The CLI uses your own token, so it can read your private repos for you.
 - Malware lookups send only a SHA-256. Local ClamAV scans run offline.
 - Security headers (CSP `frame-ancestors`, `X-Frame-Options`, `nosniff`, referrer and permissions policies) are set in `next.config.ts`.
 - The trust score summarizes GitHub's metadata. OneCLIQ looks up attestations but doesn't fully verify Sigstore signatures; when attestations exist, it suggests a `gh attestation verify` command for that.

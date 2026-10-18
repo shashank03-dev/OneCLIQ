@@ -6,7 +6,8 @@ let routes: Record<string, { status: number; body: unknown }> = {};
 beforeEach(() => {
   vi.resetModules();
   delete process.env.VIRUSTOTAL_API_KEY;
-  routes = {};
+  // The server's GitHub client is public-only, so it checks each repo's visibility first.
+  routes = { "/repos/acme/tool": { status: 200, body: { private: false } } };
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
@@ -208,5 +209,22 @@ describe("POST /api/malware", () => {
     expect(status).toBe(400);
     expect(json.error.code).toBe("INVALID_REQUEST");
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("private repositories", () => {
+  it("are never resolved for web visitors, even if the server token can read them", async () => {
+    routes["/repos/acme/secret"] = { status: 200, body: { private: true } };
+    routes["/repos/acme/secret/releases/latest"] = { status: 200, body: { tag_name: "v1", assets: [] } };
+    const { POST } = await import("@/app/api/resolve/route");
+    const res = await POST(
+      new Request("http://localhost/api/resolve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: "https://github.com/acme/secret", os: "linux", arch: "x64" }),
+      }),
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ ok: false, error: { code: "REPO_NOT_FOUND" } });
   });
 });
