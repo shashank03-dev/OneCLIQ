@@ -26,4 +26,8 @@ const HTTP_STATUS: Record<ErrorCode, number> = {
   TIMEOUT: 504,
   NETWORK: 502,
   UPSTREAM: 502,
+  PR_NOT_FOUND: 404,
+  AI_NOT_CONFIGURED: 503,
+  AI_ERROR: 502,
+  AI_RATE_LIMITED: 429,
 };

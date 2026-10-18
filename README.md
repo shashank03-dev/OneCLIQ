@@ -49,6 +49,7 @@ The stack is Next.js 16, React 19, TypeScript, Tailwind CSS 4, Zod, Vitest, and 
 | `src/core/github.ts` | Fetches release metadata from GitHub, validates responses, handles errors, and caches results briefly. |
 | `src/core/match.ts` | Classifies and ranks release assets for an OS and architecture. |
 | `src/core/resolve.ts` | Connects parsing, release selection, and matching. |
+| `src/core/review/` | AI code review: PR/branch context, Gemma 4 call, verdict, and fix prompt. Used by `oqgit review` and `/api/review`. |
 | `src/core/trust.ts`, `src/core/inspect.ts` | Calculate trust reports, check attestations, and match file digests. |
 | `src/core/releases.ts`, `src/core/lockfile.ts` | Release cooldowns, comparisons, file pins, and drift detection. |
 | `src/app/`, `src/components/` | Web pages, three API routes, resolver interface, and browser file verifier. |
@@ -72,18 +73,24 @@ cp .env.example .env.local
 | `NEXT_PUBLIC_SITE_URL` | Public base URL used for absolute metadata URLs. Set it to your deployment's actual address. |
 | `RESOLVE_RATE_LIMIT_PER_MIN` | Requests per minute per IP and per server instance, across all three API routes. Default: `30`. |
 | `GITHUB_API_BASE_URL` | Test-only override for a mock GitHub API. Leave it unset in production. |
+| `GEMINI_API_KEY` | Enables `/review` and `/api/review` (Gemma 4 code review). Without it, the page explains that reviews aren't enabled. Keep it private. |
+| `REVIEW_MODEL` | Model for web reviews. Default: `gemma-4-31b-it`. |
+| `REVIEW_THINKING` | `high` (default, thorough, can take minutes) or `minimal` (much faster). |
+| `REVIEW_RATE_LIMIT_PER_MIN` | Reviews per minute per IP and per server instance, on top of the general limit. Default: `3`. |
+| `GEMINI_API_BASE_URL` | Test-only override for a mock Gemini API. Leave it unset in production. |
 
-The CLI reads `GITHUB_TOKEN` or `GH_TOKEN`. It also supports `OQGIT_MIN_AGE` for a default release cooldown and `OQGIT_HOME` for its tracking directory. `OQGIT_API_BASE` is a CLI API override intended for tests.
+The CLI reads `GITHUB_TOKEN` or `GH_TOKEN`. It also supports `OQGIT_MIN_AGE` for a default release cooldown and `OQGIT_HOME` for its tracking directory. `OQGIT_API_BASE` is a CLI API override intended for tests. `oqgit review` reads `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) and `OQGIT_REVIEW_MODEL`.
 
 ## HTTP API
 
-All three endpoints are **POST** routes. They require a JSON body with `Content-Type: application/json`. The code limits request bodies to 4,096 characters and also checks a declared content length. Responses use `Cache-Control: no-store`.
+All four endpoints are **POST** routes. They require a JSON body with `Content-Type: application/json`. The code limits request bodies to 4,096 characters and also checks a declared content length. Responses use `Cache-Control: no-store`.
 
 | Route | Request JSON | Successful response |
 | --- | --- | --- |
 | `/api/resolve` | `{"url":"https://github.com/sharkdp/bat","os":"linux","arch":"x64"}` | `ok`, `repo`, `release`, `platform`, `recommendation`. |
 | `/api/trust` | Same `url`, `os`, and `arch` fields | `ok`, `file`, `tag`, `trust` with level, score, checks, and sometimes a verification command. |
 | `/api/verify` | `{"repo":"owner/repo","sha256":"{64 hex characters}"}` | `ok`, `repo`, `sha256`, `scanned`, `match`, `attestations`. |
+| `/api/review` | `{"url":"https://github.com/owner/repo/pull/12","goal":"optional"}` | `ok`, `model`, `change`, `title`, `summary`, `intent`, `verdict` (`safeToMerge`, `readyToMerge`, `label`, `blockers`, `counts`), `findings`, `testsToAdd`, `fixPrompt`. |
 
 `os` accepts `windows`, `macos`, or `linux`; `arch` accepts `x64`, `arm64`, or `x86`. The web form does not offer x86 for macOS.
 
@@ -97,9 +104,11 @@ curl -sS http://localhost:3000/api/resolve \
 
 An `ok: true` resolution may include `recommendation.status: "recommended"` with an `asset`, or `"not-recommended"` with a `reason`. A valid release does not guarantee a compatible download.
 
-Failures return an `ok: false` object with an `error.code` and `error.message`. Defined codes include `INVALID_URL`, `INVALID_REQUEST`, `REPO_NOT_FOUND`, `RELEASE_NOT_FOUND`, `NO_RELEASES`, `NO_STABLE_RELEASE`, `RATE_LIMITED`, `TIMEOUT`, `NETWORK`, and `UPSTREAM`. Rate-limited responses can include `retryAfter` in seconds and a `Retry-After` header.
+Failures return an `ok: false` object with an `error.code` and `error.message`. Defined codes include `INVALID_URL`, `INVALID_REQUEST`, `REPO_NOT_FOUND`, `RELEASE_NOT_FOUND`, `NO_RELEASES`, `NO_STABLE_RELEASE`, `RATE_LIMITED`, `TIMEOUT`, `NETWORK`, `UPSTREAM`, `PR_NOT_FOUND`, `AI_NOT_CONFIGURED`, and `AI_ERROR`. Rate-limited responses can include `retryAfter` in seconds and a `Retry-After` header.
 
 `/api/verify` checks up to the most recent **100 releases** for an asset with the exact SHA-256. A missing match may mean an older release or a file without a GitHub-published digest. It does not prove that a file is malicious.
+
+`/api/review` accepts pull request (any state), `/tree/{branch}`, and `/compare/{base}...{head}` links for **public** repositories only, even if the server's `GITHUB_TOKEN` could read private ones. The diff is sent to Google's Gemini API. Use `oqgit review` for private repositories and local branches.
 
 ## CLI setup and commands
 

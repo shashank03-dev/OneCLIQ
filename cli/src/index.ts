@@ -17,8 +17,10 @@ import { TRUST_LEVEL_LABELS, humanDuration, type TrustReport } from "../../src/c
 import { parseGitHubUrl } from "../../src/core/parse-url";
 import { lockPath, readLock, readLockOrEmpty, sha256File, syncOne, writeLock } from "./lock";
 import { startMcpServer } from "./mcp";
-import { makeExecutable, openFile, revealFile } from "./open";
-import { loadState, stateDir, track, untrack } from "./state";
+import { copyToClipboard, makeExecutable, openFile, revealFile } from "./open";
+import { GitError, localContext } from "./git";
+import { GemmaReviewer, GitHubPrClient, ModelQuotaError, SEVERITY_LABELS, parseReviewTarget, reviewChange, type ReviewResult, type Severity } from "../../src/core/review";
+import { loadInputLimit, loadState, saveInputLimit, stateDir, track, untrack } from "./state";
 import { detectSystem, type SystemInfo } from "./system";
 import { banner, c, card, gradient, isTTY, kv, relativeTime, table } from "./ui";
 
@@ -55,6 +57,15 @@ const OPTIONS = {
   extract: { type: "boolean" },
   "allow-download": { type: "boolean" },
   "no-trust": { type: "boolean" },
+  pr: { type: "string" },
+  base: { type: "string" },
+  head: { type: "string" },
+  goal: { type: "string", short: "g" },
+  model: { type: "string" },
+  copy: { type: "boolean" },
+  "prompt-only": { type: "boolean" },
+  strict: { type: "boolean" },
+  fast: { type: "boolean" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "v" },
 } as const;
@@ -78,13 +89,22 @@ type Flags = {
   extract?: boolean;
   "allow-download"?: boolean;
   "no-trust"?: boolean;
+  pr?: string;
+  base?: string;
+  head?: string;
+  goal?: string;
+  model?: string;
+  copy?: boolean;
+  "prompt-only"?: boolean;
+  strict?: boolean;
+  fast?: boolean;
   help?: boolean;
   version?: boolean;
 };
 
 const COMMANDS = [
   "get", "info", "list", "ls", "outdated", "update", "upgrade", "forget", "rm", "doctor", "help",
-  "trust", "diff", "verify", "lock", "sync", "mcp",
+  "trust", "diff", "verify", "lock", "sync", "mcp", "review",
 ] as const;
 
 function help(): string {
@@ -108,6 +128,11 @@ function help(): string {
     cmd("trust", "<target>", "provenance report: attestations, immutability, re-uploads, age"),
     cmd("verify", "<file> -r <repo>", "is this file on disk really from that repo's releases?"),
     cmd("diff", "<repo> [from] [to]", "what changed between two releases' files"),
+    "",
+    c.bold("Code review (Gemma 4)"),
+    cmd("review", "", "review this branch's changes against its base"),
+    cmd("review", "<pr url | o/r#12>", "review a pull request: draft, open or any state"),
+    cmd("review", "<branch/compare url>", "review a pushed branch against the default branch"),
     "",
     c.bold("Teams, CI and agents"),
     cmd("lock", "add <target…>", `pin binaries for every platform in ${LOCKFILE_NAME}`),
@@ -133,6 +158,15 @@ function help(): string {
     flag(`--lock <file>`, `lockfile path (default ./${LOCKFILE_NAME})`),
     flag("--extract", "sync: unpack archives into .oqgit/tools/"),
     flag("--allow-download", "mcp: expose the download_release tool"),
+    flag("-g, --goal <text>", "review: what the change is meant to achieve"),
+    flag("--base <branch>", "review: branch to compare against"),
+    flag("--head <branch>", "review: branch to review (with owner/repo)"),
+    flag("--pr <number>", "review: PR number (with owner/repo)"),
+    flag("--model <id>", "review: model (default gemma-4-31b-it)"),
+    flag("--copy", "review: copy the fix prompt to the clipboard"),
+    flag("--prompt-only", "review: print only the fix prompt"),
+    flag("--strict", "review: exit 4 unless safe to merge"),
+    flag("--fast", "review: light thinking: much faster, less thorough"),
     "",
     c.bold("Examples"),
     `  ${c.dim("$")} oqgit sharkdp/bat`,
@@ -143,8 +177,11 @@ function help(): string {
     `  ${c.dim("$")} oqgit get sharkdp/bat --min-age 3d`,
     `  ${c.dim("$")} oqgit lock add cli/cli sharkdp/bat && oqgit sync`,
     `  ${c.dim("$")} claude mcp add oqgit -- oqgit mcp`,
+    `  ${c.dim("$")} oqgit review https://github.com/owner/repo/pull/12`,
+    `  ${c.dim("$")} oqgit review --goal "add retry to uploads" --copy`,
     "",
     c.dim("Set GITHUB_TOKEN (or GH_TOKEN) to raise GitHub's API rate limit. OQGIT_MIN_AGE sets a default cooldown."),
+    c.dim("`review` needs GEMINI_API_KEY. OQGIT_REVIEW_MODEL changes the default model."),
     c.dim("oqgit only downloads. It never installs or runs anything unless you choose to open a file."),
     "",
   ].join("\n");
@@ -1132,6 +1169,184 @@ async function cmdSync(flags: Flags): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------
+// review
+// ---------------------------------------------------------------------------
+
+const SEVERITY_TONE: Record<Severity, (s: string) => string> = {
+  "must-fix": (s) => c.bold(c.bad(s)),
+  high: c.bad,
+  medium: c.warn,
+  low: c.info,
+  nit: c.dim,
+};
+
+function reviewer(flags: Flags): GemmaReviewer {
+  return new GemmaReviewer({
+    apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || undefined,
+    model: flags.model || process.env.OQGIT_REVIEW_MODEL || undefined,
+    apiBase: process.env.OQGIT_GEMINI_API_BASE || undefined,
+    thinking: flags.fast ? "minimal" : "high",
+  });
+}
+
+async function cmdReview(target: string | undefined, flags: Flags): Promise<number> {
+  const interactive = isTTY && !flags.json && !flags["prompt-only"];
+  const pr = flags.pr ? Number(flags.pr) : undefined;
+  if (flags.pr && (!Number.isInteger(pr) || pr! < 1)) throw new UsageError("--pr must be a pull request number.");
+  const model = reviewer(flags); // validates the model name before any GitHub calls
+  if (!process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
+    throw new ResolveError("AI_NOT_CONFIGURED", "Set GEMINI_API_KEY to run reviews. Get a free key at https://aistudio.google.com/apikey.");
+  }
+
+  if (interactive) header("review");
+  const spin = interactive ? p.spinner() : null;
+
+  let ctx;
+  try {
+    if (target) {
+      spin?.start("Reading the change from GitHub");
+      const t = parseReviewTarget(target, { allowShorthand: true, pr, head: flags.head, base: flags.base });
+      ctx = await new GitHubPrClient({
+        token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN || undefined,
+        apiBase: process.env.OQGIT_API_BASE || undefined,
+        userAgent: `oqgit/${VERSION}`,
+      }).getContext(t);
+      if (flags.goal) ctx.goal = flags.goal;
+    } else {
+      if (pr || flags.head) throw new UsageError("--pr and --head need an owner/repo target, e.g. oqgit review cli/cli --pr 12.");
+      spin?.start("Reading this branch's changes");
+      ctx = await localContext({ cwd: process.cwd(), base: flags.base, goal: flags.goal });
+    }
+  } catch (err) {
+    spin?.error(err instanceof Error ? err.message : "Couldn't read the change");
+    throw err;
+  }
+  const where = ctx.source === "pr" ? `${ctx.repo}#${ctx.number}` : `${ctx.head} → ${ctx.base}`;
+  spin?.stop(`${c.bold(where)} ${c.dim(`· ${ctx.state} · ${ctx.files.length} files`)}`);
+
+  spin?.start(`Reviewing with ${model.model} ${c.dim(flags.fast ? "(fast mode)" : "(deep thinking: can take several minutes; --fast is quicker)")}`);
+  let result: ReviewResult;
+  try {
+    const envLimit = Number(process.env.OQGIT_REVIEW_MAX_INPUT_TOKENS);
+    const maxInputTokens = envLimit > 0 ? envLimit : await loadInputLimit(model.model);
+    result = await reviewChange(ctx, model, {
+      maxInputTokens,
+      onProgress: (e) => {
+        void saveInputLimit(model.model, e.inputTokenLimit).catch(() => {});
+        const msg = `Your key allows ${e.inputTokenLimit.toLocaleString("en-US")} input tokens/min (free tier). Retrying in ${e.waitSeconds}s with the diff trimmed to fit${e.unreviewed ? ` (${e.unreviewed} files left out)` : ""}`;
+        if (spin) spin.message(msg);
+        else if (!flags.json && !flags["prompt-only"]) console.error(msg);
+      },
+    });
+  } catch (err) {
+    if (err instanceof ModelQuotaError && err.inputTokenLimit) await saveInputLimit(model.model, err.inputTokenLimit).catch(() => {});
+    spin?.error(err instanceof ResolveError ? err.message : "Review failed");
+    if (err instanceof ModelQuotaError && err.inputTokenLimit) {
+      throw new ResolveError("AI_RATE_LIMITED", `${err.message} The limit is saved: the next run trims the diff to fit and won't be rejected.`);
+    }
+    throw err;
+  }
+  spin?.stop(`Reviewed by ${model.model}`);
+
+  const code = flags.strict && !result.verdict.safeToMerge ? EXIT.policy : EXIT.ok;
+  if (flags.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return code;
+  }
+  if (flags["prompt-only"]) {
+    console.log(result.fixPrompt || "Nothing to fix.");
+    if (flags.copy && result.fixPrompt) await copyToClipboard(result.fixPrompt);
+    return code;
+  }
+  if (!interactive) {
+    console.log(plainReview(result));
+    if (flags.copy && result.fixPrompt) await copyToClipboard(result.fixPrompt);
+    return code;
+  }
+
+  const v = result.verdict;
+  const yes = (b: boolean) => (b ? c.ok("Yes") : c.bad("No"));
+  const tone = v.readyToMerge ? "ok" : v.safeToMerge ? "warn" : "bad";
+  const icon = v.readyToMerge ? c.ok("✔") : v.safeToMerge ? c.warn("▲") : c.bad("✖");
+  const lines = [
+    `${icon} ${c.bold(v.label)}`,
+    "",
+    ...kv([
+      ["Safe to merge", yes(v.safeToMerge)],
+      ["Ready to merge", yes(v.readyToMerge)],
+      ["Title", result.title.current],
+      ...(result.title.suggested && result.title.suggested !== result.title.current
+        ? ([["Suggested", c.info(result.title.suggested)]] as Array<[string, string]>)
+        : []),
+      ["Change", c.dim(`${result.change.filesChanged} files · +${result.change.additions} −${result.change.deletions}`)],
+    ]),
+  ];
+  if (v.blockers.length) lines.push("", c.dim(`Not ready: ${v.blockers.join(", ")}`));
+  console.log(card(lines, tone, "verdict", { rail: true }));
+
+  if (result.summary) p.log.message(wrap(result.summary, 84).join("\n"));
+  if (result.intent.status !== "unknown" && result.intent.notes) {
+    const it = result.intent.status === "matches" ? c.ok("on goal") : result.intent.status === "partial" ? c.warn("partly on goal") : c.bad("off goal");
+    p.log.message(`${c.dim("Goal")} ${it}  ${c.dim(wrap(result.intent.notes, 76).join("\n"))}`);
+  }
+
+  if (result.findings.length === 0) p.log.success("No issues found.");
+  for (const [i, f] of result.findings.entries()) {
+    const tag = SEVERITY_TONE[f.severity](`[${SEVERITY_LABELS[f.severity].toUpperCase()}]`);
+    const loc = f.file ? c.dim(` ${f.file}${f.line ? `:${f.line}` : ""}`) : "";
+    const body = [
+      `${c.dim(`${i + 1}.`)} ${tag} ${c.bold(f.title)}${loc}`,
+      ...(f.detail ? wrap(f.detail, 84).map((l) => `   ${l}`) : []),
+      ...(f.fix ? wrap(`Fix: ${f.fix}`, 84).map((l, j) => `   ${j === 0 ? c.ok(l.slice(0, 4)) + l.slice(4) : l}`) : []),
+    ];
+    p.log.message(body.join("\n"));
+  }
+  const list = (files: string[]) => `${files.slice(0, 8).join(", ")}${files.length > 8 ? ` +${files.length - 8} more` : ""}`;
+  if (result.change.unreviewedFiles.length) {
+    p.log.warn(`${c.warn("Partial review.")} Not fully reviewed (over the model's input limit): ${c.dim(list(result.change.unreviewedFiles))}`);
+  }
+  if (result.change.skippedFiles.length) p.log.message(c.dim(`Skipped (lockfile, generated or binary): ${list(result.change.skippedFiles)}`));
+
+  if (!result.fixPrompt) {
+    p.outro(`${gradient("Done.")} ${c.dim("Nothing to fix.")}`);
+    return code;
+  }
+  p.log.step(c.bold("Fix prompt") + c.dim(" — paste into any AI coding assistant"));
+  console.log(`${c.dim("─".repeat(Math.min(process.stdout.columns || 80, 92)))}\n${result.fixPrompt}\n${c.dim("─".repeat(Math.min(process.stdout.columns || 80, 92)))}`);
+  const copy = flags.copy || (!flags.yes && exitOnCancel(await p.confirm({ message: "Copy the fix prompt to the clipboard?", initialValue: true })));
+  if (copy) {
+    if (await copyToClipboard(result.fixPrompt)) p.log.success("Copied to the clipboard");
+    else p.log.warn("No clipboard tool found. Use --prompt-only to print just the prompt.");
+  }
+  p.outro(gradient("Done."));
+  return code;
+}
+
+/** Plain-text review for pipes and CI logs. */
+function plainReview(r: ReviewResult): string {
+  const v = r.verdict;
+  const out = [
+    `Verdict: ${v.label}`,
+    `Safe to merge: ${v.safeToMerge ? "yes" : "no"}`,
+    `Ready to merge: ${v.readyToMerge ? "yes" : "no"}${v.blockers.length ? ` (${v.blockers.join(", ")})` : ""}`,
+    ...(r.change.unreviewedFiles.length ? [`Partial review — not fully reviewed: ${r.change.unreviewedFiles.join(", ")}`] : []),
+    `Title: ${r.title.current}`,
+    `Suggested title: ${r.title.suggested}`,
+    "",
+    r.summary,
+    "",
+  ];
+  if (!r.findings.length) out.push("No issues found.");
+  for (const [i, f] of r.findings.entries()) {
+    out.push(`${i + 1}. [${SEVERITY_LABELS[f.severity].toUpperCase()}] ${f.title}${f.file ? ` (${f.file}${f.line ? `:${f.line}` : ""})` : ""}`);
+    if (f.detail) out.push(`   ${f.detail}`);
+    if (f.fix) out.push(`   Fix: ${f.fix}`);
+  }
+  if (r.fixPrompt) out.push("", "--- Fix prompt ---", r.fixPrompt, "--- end ---");
+  return out.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Interactive menu (no arguments)
 // ---------------------------------------------------------------------------
 
@@ -1146,6 +1361,7 @@ async function menu(flags: Flags): Promise<number> {
         { value: "list", label: "Tracked downloads" },
         { value: "outdated", label: "Check for updates" },
         { value: "trust", label: "Trust report", hint: "attestations, immutability, re-uploads" },
+        { value: "review", label: "Review code", hint: "a PR, a branch, or this repo's changes" },
         { value: "doctor", label: "Doctor", hint: "system, token, API quota" },
         { value: "help", label: "Help" },
       ],
@@ -1159,6 +1375,12 @@ async function menu(flags: Flags): Promise<number> {
   if (choice === "trust") {
     const t = exitOnCancel(await p.text({ message: "GitHub repository or release URL", placeholder: "owner/repo" }));
     return cmdTrust(t, flags);
+  }
+  if (choice === "review") {
+    const t = exitOnCancel(
+      await p.text({ message: "PR or branch link (leave empty to review this repo's branch)", placeholder: "https://github.com/owner/repo/pull/12" }),
+    );
+    return cmdReview(t?.trim() || undefined, flags);
   }
   if (choice === "list") return cmdList(flags);
   if (choice === "outdated") return cmdOutdated(flags);
@@ -1177,7 +1399,7 @@ function report(err: unknown) {
   } else if (err instanceof ResolveError) {
     const extra = err.code === "RATE_LIMITED" ? c.dim(`\n  Set GITHUB_TOKEN to raise the limit${err.retryAfter ? `, or retry in ~${Math.ceil(err.retryAfter / 60)} min` : ""}.`) : "";
     console.error(`${c.bad("✖")} ${err.message}${extra}`);
-  } else if (err instanceof DownloadError) {
+  } else if (err instanceof DownloadError || err instanceof GitError) {
     console.error(`${c.bad("✖")} ${err.message}`);
   } else {
     console.error(`${c.bad("✖")} Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
@@ -1236,6 +1458,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         return await cmdLock(second, rest, flags);
       case "sync":
         return await cmdSync(flags);
+      case "review":
+        return await cmdReview(second, flags);
       case "mcp":
         await startMcpServer({
           client,

@@ -64,3 +64,27 @@ export async function untrack(repo: string): Promise<number> {
   await saveState(state);
   return before - state.downloads.length;
 }
+
+/** Per-model input-token caps learned from Gemini quota errors, so later reviews trim before sending. */
+const limitsFile = () => path.join(stateDir(), "review-limits.json");
+
+export async function loadInputLimit(model: string): Promise<number | undefined> {
+  try {
+    const n = (JSON.parse(await readFile(limitsFile(), "utf8")) as Record<string, unknown>)[model];
+    return typeof n === "number" && n > 0 ? n : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function saveInputLimit(model: string, limit: number): Promise<void> {
+  let all: Record<string, number> = {};
+  try {
+    all = JSON.parse(await readFile(limitsFile(), "utf8"));
+  } catch {
+    /* first write */
+  }
+  all[model] = limit;
+  await mkdir(stateDir(), { recursive: true });
+  await writeFile(limitsFile(), JSON.stringify(all, null, 2));
+}

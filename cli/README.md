@@ -108,6 +108,26 @@ Commit `oqgit.lock.json` alongside your project if your team wants reproducible 
 
 A lockfile cannot cryptographically pin a file that has no published digest. Review changes to locked versions before merging them.
 
+## Review pull requests and branches
+
+`oqgit review` asks Google's Gemma 4 (`gemma-4-31b-it`, through the Gemini API) to review a change. Every issue is tagged **must fix**, **high**, **medium**, **low**, or **nit**, with the file, line, and a concrete fix. You then get a verdict (safe to merge, ready to merge), the current and a suggested title, and **one fix prompt** to paste into any AI coding assistant.
+
+```bash
+export GEMINI_API_KEY=...   # free key: https://aistudio.google.com/apikey
+
+oqgit review                                         # this branch (and uncommitted changes) vs. origin's default branch
+oqgit review --base develop --goal "retry failed uploads"
+oqgit review https://github.com/owner/repo/pull/12   # any PR: draft, open, closed
+oqgit review owner/repo#12
+oqgit review https://github.com/owner/repo/tree/my-branch
+oqgit review https://github.com/owner/repo/compare/main...my-branch
+oqgit review owner/repo --head my-branch --base main
+```
+
+Useful flags: `-g, --goal` tells the reviewer what the change should achieve, `--copy` copies the fix prompt, `--prompt-only` prints only the prompt (for piping), `--json` prints the full result, `--fast` uses light thinking for a much quicker (less thorough) review, and `--strict` exits with code 4 unless the change is safe to merge (for CI). `--model` or `OQGIT_REVIEW_MODEL` picks another model.
+
+**Safe to merge** means no must-fix or high-risk findings. **Ready to merge** also needs no medium-risk findings, a PR that isn't a draft or closed, and a change that does what its goal says. oqgit makes this call from the findings, so the same findings always give the same verdict. On the Gemini API free tier, Gemma 4 31B accepts only 16,000 input tokens per minute. When a change is bigger than that, oqgit retries once with the diff trimmed to fit and marks the review **partial**: a partial review is never called safe or ready to merge. Enable billing on the key for full reviews of large changes. With thinking on, a review can take a few minutes. Local reviews skip untracked files unless you `git add -N` them. Lockfiles, generated output, and binaries aren't sent. Review private repositories with a `GITHUB_TOKEN` that can read them. The diff is sent to Google's Gemini API.
+
 ## Use with coding agents
 
 `oqgit mcp` starts a Model Context Protocol (MCP) server on standard input and output. It offers tools for resolving releases, trust reports, release diffs, file verification, and lock checks. Downloads are disabled unless you start it with `--allow-download`.
@@ -122,7 +142,7 @@ Consult your MCP client's documentation for its registration format. The MCP ser
 
 ## Configuration, files, and limitations
 
-Set `GITHUB_TOKEN` or `GH_TOKEN` to increase the GitHub API request quota. Public repositories work without a token. `OQGIT_HOME` can override the local tracking-data directory; `oqgit doctor` shows the paths in use. Never commit tokens or private local state.
+Set `GITHUB_TOKEN` or `GH_TOKEN` to increase the GitHub API request quota. Public repositories work without a token. `oqgit review` needs `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). `OQGIT_HOME` can override the local tracking-data directory; `oqgit doctor` shows the paths in use. Never commit tokens or private local state.
 
 Only public repositories on `github.com` are supported. Filename matching can fail for unconventional releases. Linux package preference depends in part on `/etc/os-release`, while macOS and Windows compatibility checks depend on platform information available from Node and the operating system.
 

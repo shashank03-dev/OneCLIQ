@@ -7,7 +7,7 @@ const MAX_REQUESTS = Number(process.env.RESOLVE_RATE_LIMIT_PER_MIN) || 30;
 
 const hits = new Map<string, { count: number; resetAt: number }>();
 
-export function checkRateLimit(key: string, now = Date.now()): { ok: true } | { ok: false; retryAfter: number } {
+export function checkRateLimit(key: string, now = Date.now(), max = MAX_REQUESTS): { ok: true } | { ok: false; retryAfter: number } {
   const entry = hits.get(key);
   if (!entry || entry.resetAt <= now) {
     if (hits.size > 10_000) hits.clear();
@@ -15,6 +15,6 @@ export function checkRateLimit(key: string, now = Date.now()): { ok: true } | { 
     return { ok: true };
   }
   entry.count++;
-  if (entry.count > MAX_REQUESTS) return { ok: false, retryAfter: Math.ceil((entry.resetAt - now) / 1000) };
+  if (entry.count > max) return { ok: false, retryAfter: Math.ceil((entry.resetAt - now) / 1000) };
   return { ok: true };
 }

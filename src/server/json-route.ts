@@ -18,10 +18,13 @@ export function failResponse(err: unknown) {
   return jsonResponse(toFailure(err), 500);
 }
 
+export function clientIp(request: Request): string {
+  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
+}
+
 /** Rate limit + JSON content type + size cap + schema. Throws ResolveError with a user-safe message. */
 export async function readJsonBody<T>(request: Request, schema: z.ZodType<T>, invalidMessage: string): Promise<T> {
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
-  const limited = checkRateLimit(ip);
+  const limited = checkRateLimit(clientIp(request));
   if (!limited.ok) {
     throw new ResolveError("RATE_LIMITED", "You're going a little fast. Please wait a moment and try again.", { retryAfter: limited.retryAfter });
   }

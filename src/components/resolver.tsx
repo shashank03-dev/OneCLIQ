@@ -38,6 +38,10 @@ const ERROR_TITLES: Record<ErrorCode, string> = {
   TIMEOUT: "GitHub didn’t answer in time",
   NETWORK: "Couldn’t reach the server",
   UPSTREAM: "Something went wrong",
+  PR_NOT_FOUND: "Pull request not found",
+  AI_NOT_CONFIGURED: "Reviews aren’t set up",
+  AI_ERROR: "The reviewer didn’t answer",
+  AI_RATE_LIMITED: "Review quota reached",
 };
 
 type State =

@@ -59,7 +59,11 @@ export type ErrorCode =
   | "RATE_LIMITED"
   | "TIMEOUT"
   | "NETWORK"
-  | "UPSTREAM";
+  | "UPSTREAM"
+  | "PR_NOT_FOUND"
+  | "AI_NOT_CONFIGURED"
+  | "AI_ERROR"
+  | "AI_RATE_LIMITED";
 
 export interface ResolvedAsset {
   name: string;

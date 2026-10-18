@@ -11,16 +11,19 @@ export function SiteNav() {
         <Logo />
       </Link>
       <nav aria-label="Primary" className="flex items-center gap-1 text-[14px] text-ink-muted sm:gap-6">
-        <a href="#how" className="hidden transition-colors hover:text-ink sm:inline">
+        <Link href="/#how" className="hidden transition-colors hover:text-ink sm:inline">
           How it works
-        </a>
-        <a href="#verify" className="hidden transition-colors hover:text-ink sm:inline">
+        </Link>
+        <Link href="/#verify" className="hidden transition-colors hover:text-ink sm:inline">
           Verify a file
-        </a>
-        <a href="#cli" className="hidden transition-colors hover:text-ink sm:inline">
+        </Link>
+        <Link href="/#cli" className="hidden transition-colors hover:text-ink sm:inline">
           CLI
-        </a>
-        <PillButton href="#cli" className="h-10 px-4 text-[13.5px]">
+        </Link>
+        <Link href="/review" className="px-2 transition-colors hover:text-ink sm:px-0">
+          Review a PR
+        </Link>
+        <PillButton href="/#cli" className="h-10 px-4 text-[13.5px]">
           <Terminal aria-hidden className="size-3.5" />
           Get oqgit
         </PillButton>

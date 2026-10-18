@@ -3,9 +3,10 @@ import Noise from "@/components/designpass/Noise";
 import { Landscape } from "@/components/ui/landscape";
 
 const LINKS = [
-  { label: "How it works", href: "#how" },
-  { label: "CLI", href: "#cli" },
-  { label: "Try it", href: "#find" },
+  { label: "How it works", href: "/#how" },
+  { label: "CLI", href: "/#cli" },
+  { label: "Try it", href: "/#find" },
+  { label: "Review a PR", href: "/review" },
 ];
 
 /** “Organized.” row + giant wordmark over a painted meadow (after micro's footer). */

@@ -29,3 +29,23 @@ export async function revealFile(file: string): Promise<void> {
 export async function makeExecutable(file: string): Promise<void> {
   await chmod(file, 0o755);
 }
+
+/** Copy text to the system clipboard. Resolves false when no clipboard tool is available. */
+export function copyToClipboard(text: string): Promise<boolean> {
+  const candidates: Array<[string, string[]]> =
+    process.platform === "darwin"
+      ? [["pbcopy", []]]
+      : process.platform === "win32"
+        ? [["clip.exe", []]]
+        : [["wl-copy", []], ["xclip", ["-selection", "clipboard"]], ["xsel", ["--clipboard", "--input"]]];
+  const attempt = (i: number): Promise<boolean> =>
+    i >= candidates.length
+      ? Promise.resolve(false)
+      : new Promise((resolve) => {
+          const child = spawn(candidates[i][0], candidates[i][1], { stdio: ["pipe", "ignore", "ignore"], shell: false });
+          child.on("error", () => resolve(attempt(i + 1)));
+          child.on("close", (code) => (code === 0 ? resolve(true) : resolve(attempt(i + 1))));
+          child.stdin.end(text);
+        });
+  return attempt(0);
+}
