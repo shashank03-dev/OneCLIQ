@@ -77,6 +77,7 @@ for (const domain of readdirSync(skillsDir).sort()) {
       description: data.description,
       ...(data.compatibility ? { compatibility: data.compatibility } : {}),
       version: data.metadata.version ?? "1.0",
+      ...(data.metadata["inspired-by"] ? { inspiredBy: data.metadata["inspired-by"] } : {}),
       path: rel.split(path.sep).join("/"),
       content,
     });

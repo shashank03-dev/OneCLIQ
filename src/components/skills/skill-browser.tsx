@@ -241,6 +241,11 @@ function SkillDrawer({ skill, agent, onClose }: { skill: SkillMeta | null; agent
                   {skill.title}
                 </h3>
                 <p className="mt-3 max-w-lg text-[14px] leading-relaxed text-night-muted">{skill.description}</p>
+                {skill.inspiredBy && (
+                  <p className="mt-2 max-w-lg text-[12px] leading-relaxed text-night-muted/70">
+                    Inspired by {skill.inspiredBy}. Original text, MIT.
+                  </p>
+                )}
               </div>
               <button
                 ref={closeBtn}

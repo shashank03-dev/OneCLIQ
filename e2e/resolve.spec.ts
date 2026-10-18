@@ -3,8 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 async function resolve(page: Page, url: string, os: string, arch: string) {
   await page.goto("/");
   await page.getByLabel("GitHub repository or release URL").fill(url);
-  await page.getByLabel("Operating system").selectOption(os);
-  await page.getByLabel("Architecture").selectOption(arch);
+  await page.getByLabel("Operating system", { exact: true }).selectOption(os);
+  await page.getByLabel("Architecture", { exact: true }).selectOption(arch);
   await page.getByRole("button", { name: "Find download" }).click();
 }
 
@@ -127,10 +127,10 @@ test("is keyboard operable", async ({ page }) => {
   await page.getByLabel("GitHub repository or release URL").focus();
   await page.keyboard.type("https://github.com/acme/desktop");
   await page.keyboard.press("Tab");
-  await expect(page.getByLabel("Operating system")).toBeFocused();
-  await page.getByLabel("Operating system").selectOption("linux");
+  await expect(page.getByLabel("Operating system", { exact: true })).toBeFocused();
+  await page.getByLabel("Operating system", { exact: true }).selectOption("linux");
   await page.keyboard.press("Tab");
-  await page.getByLabel("Architecture").selectOption("x64");
+  await page.getByLabel("Architecture", { exact: true }).selectOption("x64");
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "Find download" })).toBeFocused();
   await page.keyboard.press("Enter");

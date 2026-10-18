@@ -12,9 +12,17 @@ export type { AgentId, DomainId, Skill, SkillMeta } from "./search";
 
 const DOMAIN_ORDER: readonly string[] = DOMAINS.map((d) => d.id);
 
-/** Every skill, in domain order (frontend → git workflow), then by name. */
+/** Lead skills shown first within their domain, in workflow order; the rest follow by name. */
+const LEAD = [
+  "grill-the-plan", "write-a-spec", "plan-and-break-down", "systematic-debugging", "verify-before-done", "session-handoff",
+  "frontend-design", "postgres-best-practices", "test-driven-development", "secure-code-review", "pull-request-review",
+];
+const lead = (name: string) => (LEAD.includes(name) ? LEAD.indexOf(name) : LEAD.length);
+
+/** Every skill, in domain order (workflow → languages), lead skills first, then by name. */
 export const SKILLS = [...(catalog.skills as Skill[])].sort(
-  (a, b) => DOMAIN_ORDER.indexOf(a.domain) - DOMAIN_ORDER.indexOf(b.domain) || a.name.localeCompare(b.name),
+  (a, b) =>
+    DOMAIN_ORDER.indexOf(a.domain) - DOMAIN_ORDER.indexOf(b.domain) || lead(a.name) - lead(b.name) || a.name.localeCompare(b.name),
 );
 
 export function findSkill(name: string): Skill | undefined {
