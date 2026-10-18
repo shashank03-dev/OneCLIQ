@@ -3,6 +3,7 @@ import { resolve, toFailure } from "@/core/resolve";
 import { ResolveError } from "@/core/errors";
 import { ARCH_VALUES, OS_VALUES, type ResolveResponse } from "@/core/types";
 import { getGitHubClient } from "@/server/github-client";
+import { clientIp } from "@/server/json-route";
 import { checkRateLimit } from "@/server/rate-limit";
 
 const BodySchema = z.object({
@@ -26,9 +27,7 @@ function fail(err: ResolveError) {
 }
 
 export async function POST(request: Request) {
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
-  const limited = checkRateLimit(ip);
+  const limited = checkRateLimit(clientIp(request));
   if (!limited.ok) {
     return fail(
       new ResolveError("RATE_LIMITED", "You're going a little fast. Please wait a moment and try again.", {

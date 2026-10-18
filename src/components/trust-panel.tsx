@@ -6,6 +6,7 @@ import { ChevronDown, Fingerprint, Loader2, ShieldCheck, ShieldQuestion, Triangl
 import type { Platform } from "@/core/types";
 import { TRUST_LEVEL_LABELS, type CheckStatus, type TrustReport } from "@/core/trust";
 import { cn } from "@/lib/cn";
+import { postJson } from "@/lib/api";
 
 type State =
   | { kind: "loading" }
@@ -32,16 +33,10 @@ export function TrustPanel({ releaseUrl, platform }: { releaseUrl: string; platf
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/trust", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ url: releaseUrl, os: platform.os, arch: platform.arch }),
-      signal: controller.signal,
-    })
-      .then((r) => r.json())
-      .then((body: { ok: boolean; trust?: TrustReport; error?: { message: string } }) => {
-        if (body.ok && body.trust) setState({ kind: "ready", trust: body.trust });
-        else setState({ kind: "error", message: body.error?.message ?? "Couldn’t check provenance." });
+    postJson<{ ok: true; trust: TrustReport }>("/api/trust", { url: releaseUrl, os: platform.os, arch: platform.arch }, controller.signal)
+      .then((body) => {
+        if (body.ok) setState({ kind: "ready", trust: body.trust });
+        else setState({ kind: "error", message: body.error.message || "Couldn’t check provenance." });
       })
       .catch((err: { name?: string }) => {
         if (err?.name !== "AbortError") setState({ kind: "error", message: "Couldn’t check provenance right now." });

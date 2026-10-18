@@ -21,6 +21,8 @@
     "test:e2e": "next build && playwright test",
     "cli:build": "tsup",
     "cli:dev": "tsx cli/src/bin.ts",
+    "cli:pack": "npm run cli:build && npm pack ./cli --dry-run",
+    "cli:publish": "npm run cli:build && npm publish ./cli",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build && npm run cli:build"
   },
   "dependencies": {

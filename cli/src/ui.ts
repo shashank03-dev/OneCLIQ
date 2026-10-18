@@ -2,32 +2,50 @@
 import pc from "picocolors";
 
 export const isTTY = !!process.stdout.isTTY;
-const truecolor = pc.isColorSupported && /truecolor|24bit/i.test(process.env.COLORTERM ?? "");
+const env = process.env;
+/** 24-bit colour: advertised via COLORTERM, or a terminal known to support it. */
+const truecolor =
+  pc.isColorSupported &&
+  (/truecolor|24bit/i.test(env.COLORTERM ?? "") ||
+    !!env.WT_SESSION || // Windows Terminal
+    ["iTerm.app", "vscode", "WezTerm", "ghostty", "Hyper"].includes(env.TERM_PROGRAM ?? "") ||
+    /kitty|alacritty|ghostty/i.test(env.TERM ?? ""));
+/** Nearly every terminal colour mode beyond the basic 16 (e.g. macOS Terminal.app) handles 256 colours. */
+const color256 = pc.isColorSupported && (truecolor || /256/.test(env.TERM ?? "") || env.TERM_PROGRAM === "Apple_Terminal" || process.platform === "win32");
 
 type Rgb = [number, number, number];
+/** OneCLIQ's ember → lilac → dusk, the same palette as the website. */
 const STOPS: Rgb[] = [
-  [34, 211, 238], // cyan
-  [139, 92, 246], // violet
-  [230, 73, 199], // fuchsia
+  [229, 88, 43], // ember
+  [240, 138, 90],
+  [172, 161, 244], // lilac
+  [91, 75, 219], // dusk
 ];
 
 function lerp(a: Rgb, b: Rgb, t: number): Rgb {
   return [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * t)) as Rgb;
 }
 
-/** Horizontal cyan → violet → fuchsia gradient (falls back to plain magenta). */
-export function gradient(text: string): string {
+function at(t: number): Rgb {
+  const seg = Math.min(STOPS.length - 2, Math.floor(t * (STOPS.length - 1)));
+  return lerp(STOPS[seg], STOPS[seg + 1], t * (STOPS.length - 1) - seg);
+}
+
+/** Closest colour in the xterm 6×6×6 cube. */
+const to256 = ([r, g, b]: Rgb) => 16 + 36 * Math.round((r / 255) * 5) + 6 * Math.round((g / 255) * 5) + Math.round((b / 255) * 5);
+
+function paint(ch: string, rgb: Rgb): string {
+  if (truecolor) return `\x1b[38;2;${rgb[0]};${rgb[1]};${rgb[2]}m${ch}\x1b[39m`;
+  return `\x1b[38;5;${to256(rgb)}m${ch}\x1b[39m`;
+}
+
+/** Horizontal brand gradient (truecolor, then 256 colours, then plain magenta). `width` spreads it over a wider block. */
+export function gradient(text: string, width?: number): string {
   if (!pc.isColorSupported) return text;
-  if (!truecolor) return pc.magenta(text);
+  if (!color256) return pc.magenta(text);
   const chars = [...text];
-  const n = Math.max(chars.length - 1, 1);
-  return chars
-    .map((ch, i) => {
-      const t = i / n;
-      const [r, g, b] = t < 0.5 ? lerp(STOPS[0], STOPS[1], t * 2) : lerp(STOPS[1], STOPS[2], (t - 0.5) * 2);
-      return ch === " " ? ch : `\x1b[38;2;${r};${g};${b}m${ch}\x1b[39m`;
-    })
-    .join("");
+  const n = Math.max((width ?? chars.length) - 1, 1);
+  return chars.map((ch, i) => (ch === " " ? ch : paint(ch, at(Math.min(1, i / n))))).join("");
 }
 
 export const c = {
@@ -35,7 +53,7 @@ export const c = {
   warn: (s: string) => pc.yellow(s),
   bad: (s: string) => pc.red(s),
   info: (s: string) => pc.cyan(s),
-  accent: (s: string) => pc.magenta(s),
+  accent: (s: string) => (color256 ? paint(s, STOPS[2]) : pc.magenta(s)),
   dim: (s: string) => pc.dim(s),
   bold: (s: string) => pc.bold(s),
   mono: (s: string) => pc.white(s),
@@ -46,15 +64,14 @@ export const visibleLength = (s: string) => [...s.replace(ANSI, "")].length;
 const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - visibleLength(s)));
 
 export function banner(version: string): string {
-  const art = [
-    "  ┌─┐ ┌─┐ ┌─┐ ┬ ┌┬┐",
-    "  │ │ │ │ │ ┬ │  │ ",
-    "  └─┘ └─┼ └─┘ ┴  ┴ ",
-  ];
+  const art = ["█▀█ █▀█ █▀▀ █ ▀█▀", "█▄█ ▀▀█ █▄█ █  █ "];
+  const w = Math.max(...art.map((l) => l.length));
   return [
     "",
-    ...art.map((l) => gradient(l)),
-    `  ${c.dim(`GitHub release resolver · v${version}`)}`,
+    `  ${gradient(art[0], w)}`,
+    `  ${gradient(art[1], w)}  ${c.dim(`v${version}`)}`,
+    "",
+    `  ${c.bold("The right download from any GitHub release.")} ${c.dim("Plus AI pull request review.")}`,
     "",
   ].join("\n");
 }

@@ -4,6 +4,29 @@
 
 **A match is not a safety guarantee.** `oqgit` uses filenames and GitHub metadata to choose a file, and it checks downloads for **known** malware — a VirusTotal hash lookup and, when VirusTotal can't answer and ClamAV is installed, a local scan. No check proves software harmless, and `oqgit` never installs anything. Opening a downloaded file is a separate, explicit action.
 
+## Install
+
+One line, on macOS or Linux:
+
+```bash
+curl -fsSL https://onecliq-eta.vercel.app/install | sh
+```
+
+On Windows (PowerShell):
+
+```powershell
+irm https://onecliq-eta.vercel.app/install | iex
+```
+
+The installer checks for Node.js 20+, installs from npm without sudo or admin rights, and tells you if anything else is needed. With Node.js already set up, npm works directly:
+
+```bash
+npm install -g onecliq
+oqgit --help
+```
+
+Or run it once without installing: `npx onecliq sharkdp/bat`. The npm package is called `onecliq`; the command it installs is `oqgit`.
+
 ## Install from source
 
 You need Node.js 20 or newer and npm. To build the CLI from a checkout of this repository:
@@ -29,7 +52,7 @@ For development, run the TypeScript source without a separate build:
 npm run cli:dev -- get sharkdp/bat --dry-run
 ```
 
-The npm package is named `oqgit` in `cli/package.json`. Check whether it is published before relying on `npm install -g oqgit`. The source installation above works without an npm registry release.
+The published package is `onecliq` on npm (`npm install -g onecliq`); maintainers release it with `npm run cli:publish` from the repository root.
 
 ## Download your first file
 
@@ -121,6 +144,8 @@ A lockfile cannot cryptographically pin a file that has no published digest. Rev
 
 ```bash
 export GEMINI_API_KEY=...   # free key: https://aistudio.google.com/apikey
+# or several keys, rotated when one hits its rate limit:
+export GEMINI_API_KEYS=key1,key2,key3
 
 oqgit review                                         # this branch (and uncommitted changes) vs. origin's default branch
 oqgit review --base develop --goal "retry failed uploads"
@@ -132,7 +157,7 @@ oqgit review https://github.com/owner/repo/compare/main...my-branch
 oqgit review owner/repo --head my-branch --base main
 ```
 
-Useful flags: `-g, --goal` tells the reviewer what the change should achieve, `--copy` copies the fix prompt, `--prompt-only` prints only the prompt (for piping), `--json` prints the full result, `--fast` uses light thinking for a much quicker (less thorough) review, and `--strict` exits with code 4 unless the change is safe to merge (for CI). `--model` or `OQGIT_REVIEW_MODEL` picks another model.
+Useful flags: `-g, --goal` tells the reviewer what the change should achieve, `--copy` copies the fix prompt, `--prompt-only` prints only the prompt (for piping), `--json` prints the full result, `--fast` uses light thinking for a much quicker (less thorough) review, and `--strict` exits with code 4 unless the change is safe to merge (for CI). `--model` or `OQGIT_REVIEW_MODEL` picks another model. When the model is rate limited or overloaded on every key, the review falls back to `gemma-4-26b-a4b-it`; set `OQGIT_REVIEW_FALLBACK_MODELS` to change that (`none` turns it off).
 
 **Safe to merge** means no must-fix or high-risk findings. **Ready to merge** also needs no medium-risk findings, a PR that isn't a draft or closed, and a change that does what its goal says. oqgit makes this call from the findings, so the same findings always give the same verdict. On the Gemini API free tier, Gemma 4 31B accepts only 16,000 input tokens per minute. When a change is bigger than that, oqgit retries once with the diff trimmed to fit and marks the review **partial**: a partial review is never called safe or ready to merge. Enable billing on the key for full reviews of large changes. With thinking on, a review can take a few minutes. Local reviews skip untracked files unless you `git add -N` them. Lockfiles, generated output, and binaries aren't sent. Review private repositories with a `GITHUB_TOKEN` that can read them. The diff is sent to Google's Gemini API.
 
@@ -150,7 +175,7 @@ Consult your MCP client's documentation for its registration format. The MCP ser
 
 ## Configuration, files, and limitations
 
-Set `GITHUB_TOKEN` or `GH_TOKEN` to increase the GitHub API request quota. Public repositories work without a token. `oqgit review` needs `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). Set `VIRUSTOTAL_API_KEY` (free tier: about 4 lookups/minute and 500/day) for hash reputation checks. `OQGIT_CLAMSCAN` points at a specific ClamAV binary when it isn't on `PATH`. `OQGIT_HOME` can override the local tracking-data directory; `oqgit doctor` shows the paths in use. Never commit tokens or private local state.
+Set `GITHUB_TOKEN` or `GH_TOKEN` to increase the GitHub API request quota. Public repositories work without a token. `oqgit review` needs `GEMINI_API_KEY`, `GEMINI_API_KEYS` (several, comma-separated) or `GOOGLE_API_KEY`. Set `VIRUSTOTAL_API_KEY` (free tier: about 4 lookups/minute and 500/day) for hash reputation checks. `OQGIT_CLAMSCAN` points at a specific ClamAV binary when it isn't on `PATH`. `OQGIT_HOME` can override the local tracking-data directory; `oqgit doctor` shows the paths in use. Never commit tokens or private local state.
 
 Only public repositories on `github.com` are supported. Filename matching can fail for unconventional releases. Linux package preference depends in part on `/etc/os-release`, while macOS and Windows compatibility checks depend on platform information available from Node and the operating system.
 

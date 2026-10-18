@@ -5,7 +5,8 @@ import type { ModelReview, ReviewContext, ReviewResult } from "./types";
 import { buildFixPrompt, computeVerdict, sortFindings } from "./verdict";
 
 export { GitHubPrClient } from "./github-pr";
-export { DEFAULT_REVIEW_MODEL, GemmaReviewer, ModelQuotaError } from "./gemma";
+export { DEFAULT_FALLBACK_MODELS, DEFAULT_REVIEW_MODEL, GemmaReviewer, ModelQuotaError } from "./gemma";
+export { KeyPool, parseApiKeys } from "./key-pool";
 export { parseReviewTarget } from "./target";
 export { SEVERITIES, SEVERITY_LABELS, normalizeSeverity } from "./types";
 export type { ChangedFile, Finding, ReviewContext, ReviewResult, ReviewTarget, ReviewVerdict, Severity } from "./types";
@@ -26,7 +27,6 @@ export interface ReviewOptions {
   /** Known per-request input cap (e.g. 16,000 on the Gemini free tier): trim up front instead of being rejected first. */
   maxInputTokens?: number;
   onProgress?: (event: ReviewProgress) => void;
-  sleep?: (ms: number) => Promise<void>;
 }
 
 /** Review one change end to end: pack the diff, ask the model, then decide the verdict and fix prompt locally. */
@@ -56,19 +56,9 @@ export async function reviewChange(ctx: ReviewContext, reviewer: GemmaReviewer, 
     const trimmed = packDiff(ctx.files, budget);
     if (budget < 2_000 || trimmed.included.length === 0) throw err;
     packed = trimmed;
-    // Rejected requests still count against the rolling minute, whatever retryDelay says, so each retry must clear the last attempt.
-    const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-    const waitSeconds = 90;
-    opts.onProgress?.({ kind: "trimmed", inputTokenLimit: err.inputTokenLimit, unreviewed: packed.unreviewed.length, waitSeconds });
-    await sleep(waitSeconds * 1000);
-    const trimmedUser = buildUserPrompt(ctx, packed);
-    try {
-      review = await reviewer.review(SYSTEM_PROMPT, trimmedUser);
-    } catch (again) {
-      if (!(again instanceof ModelQuotaError) || !again.inputTokenLimit) throw again;
-      await sleep(75_000);
-      review = await reviewer.review(SYSTEM_PROMPT, trimmedUser);
-    }
+    // The reviewer waits for a rested key (or uses another key or model) before sending the trimmed prompt.
+    opts.onProgress?.({ kind: "trimmed", inputTokenLimit: err.inputTokenLimit, unreviewed: packed.unreviewed.length, waitSeconds: Math.ceil(reviewer.readyIn() / 1000) });
+    review = await reviewer.review(SYSTEM_PROMPT, buildUserPrompt(ctx, packed));
   }
 
   const findings = sortFindings(review.findings.filter((f) => f.title || f.detail));
@@ -76,7 +66,7 @@ export async function reviewChange(ctx: ReviewContext, reviewer: GemmaReviewer, 
 
   return {
     ok: true,
-    model: reviewer.model,
+    model: reviewer.lastModel ?? reviewer.model,
     change: {
       source: ctx.source,
       repo: ctx.repo,

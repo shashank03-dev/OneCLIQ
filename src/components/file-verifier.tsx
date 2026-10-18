@@ -6,6 +6,7 @@ import { CircleCheck, CircleX, FileSearch, Loader2, TriangleAlert, Upload } from
 import { parseGitHubUrl } from "@/core/parse-url";
 import { formatBytes } from "@/core/labels";
 import { cn } from "@/lib/cn";
+import { postJson } from "@/lib/api";
 
 interface VerifyResult {
   ok: true;
@@ -59,12 +60,7 @@ export function FileVerifier() {
     }
     setState({ kind: "checking", name: f.name, sha256 });
     try {
-      const res = await fetch("/api/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ repo, sha256 }),
-      });
-      const body = (await res.json()) as VerifyResult | { ok: false; error: { message: string } };
+      const body = await postJson<VerifyResult>("/api/verify", { repo, sha256 });
       if (body.ok) setState({ kind: "done", name: f.name, result: body });
       else setState({ kind: "error", message: body.error.message });
     } catch {

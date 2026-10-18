@@ -265,10 +265,18 @@ describe("Gemini quota handling", () => {
     }) as unknown as typeof fetch;
     const events: unknown[] = [];
     const waits: number[] = [];
-    const result = await reviewChange(ctx, new GemmaReviewer({ apiKey: "k", fetch: impl }), {
-      onProgress: (e) => events.push(e),
-      sleep: async (ms) => void waits.push(ms),
+    let t = 1_000_000;
+    const reviewer = new GemmaReviewer({
+      apiKey: "k",
+      fetch: impl,
+      fallbackModels: [],
+      now: () => t,
+      sleep: async (ms) => {
+        waits.push(ms);
+        t += ms;
+      },
     });
+    const result = await reviewChange(ctx, reviewer, { onProgress: (e) => events.push(e) });
     expect(prompts[1]).toBeLessThan(16000 * 3);
     expect(events).toEqual([{ kind: "trimmed", inputTokenLimit: 16000, unreviewed: 1, waitSeconds: 90 }]);
     expect(waits).toEqual([90000]);
@@ -287,7 +295,7 @@ describe("Gemini quota handling", () => {
 
   it("doesn't retry when the prompt already fit", async () => {
     const impl = (async () => new Response(FREE_TIER_429, { status: 429 })) as unknown as typeof fetch;
-    await expect(reviewChange(CTX, new GemmaReviewer({ apiKey: "k", fetch: impl }), { sleep: async () => {} })).rejects.toMatchObject({ code: "AI_RATE_LIMITED" });
+    await expect(reviewChange(CTX, new GemmaReviewer({ apiKey: "k", fetch: impl, sleep: async () => {} }))).rejects.toMatchObject({ code: "AI_RATE_LIMITED" });
   });
 });
 

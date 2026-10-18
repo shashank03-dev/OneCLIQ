@@ -12,6 +12,7 @@ import { detectPlatform, type DetectedPlatform } from "@/lib/detect-platform";
 import { cn } from "@/lib/cn";
 import { ResultCard } from "./result-card";
 import JellyButton from "./designpass/JellyButton";
+import { postJson } from "@/lib/api";
 
 const EXAMPLES = [
   { label: "cli/cli", url: "https://github.com/cli/cli" },
@@ -102,18 +103,7 @@ export function Resolver() {
     setState({ kind: "loading" });
 
     try {
-      const res = await fetch("/api/resolve", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: value, os, arch }),
-        signal: controller.signal,
-      });
-      let body: ResolveResponse;
-      try {
-        body = (await res.json()) as ResolveResponse;
-      } catch {
-        throw new Error("bad body");
-      }
+      const body = await postJson<ResolveResponse>("/api/resolve", { url: value, os, arch }, controller.signal);
       if (body.ok) {
         setState({ kind: "success", result: body });
       } else if (body.error.code === "INVALID_URL") {
@@ -121,7 +111,7 @@ export function Resolver() {
         setFieldError(body.error.message);
         inputRef.current?.focus();
       } else {
-        setState({ kind: "error", ...body.error });
+        setState({ kind: "error", ...(body.error as Extract<ResolveResponse, { ok: false }>["error"]) });
       }
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;

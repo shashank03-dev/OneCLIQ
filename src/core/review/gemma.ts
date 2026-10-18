@@ -4,10 +4,16 @@
  */
 import { z } from "zod";
 import { ResolveError } from "../errors";
+import { KeyPool } from "./key-pool";
 import { ModelReviewSchema, type ModelReview } from "./types";
 
 /** Gemma 4's largest and most capable model. Override with OQGIT_REVIEW_MODEL / REVIEW_MODEL. */
 export const DEFAULT_REVIEW_MODEL = "gemma-4-31b-it";
+/**
+ * Used when the primary model is rate limited or overloaded on every key. Gemma 4's mixture-of-experts model:
+ * same prompt format and thinking control, much faster, and a separate per-model quota bucket.
+ */
+export const DEFAULT_FALLBACK_MODELS: readonly string[] = ["gemma-4-26b-a4b-it"];
 export const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 const MODEL_RE = /^[a-z0-9][a-z0-9.\-]{1,80}$/;
@@ -15,15 +21,28 @@ const MODEL_RE = /^[a-z0-9][a-z0-9.\-]{1,80}$/;
 export type ThinkingLevel = "high" | "minimal";
 
 export interface ModelClientOptions {
+  /** One key. Ignored when `apiKeys` or `keyPool` is given. */
   apiKey?: string;
+  /** Several keys, rotated per request; a rate-limited key rests while the others carry on. */
+  apiKeys?: string[];
+  /** A pool shared across reviewers (e.g. one per server process) so cooldowns outlive a single request. */
+  keyPool?: KeyPool;
   model?: string;
+  /** Tried in order when the primary model is rate limited or overloaded on every key. Default: Gemma 4 26B A4B. */
+  fallbackModels?: readonly string[];
   apiBase?: string;
   timeoutMs?: number;
   fetch?: typeof fetch;
   /** "high" (default) is thorough but slow; "minimal" answers far faster. */
   thinking?: ThinkingLevel;
-  /** Waits before retrying a temporary 500/503 ("high demand"). Default: 10s, then 30s. */
+  /** Waits before another round after every model was temporarily overloaded (500/503). Default: 10s, then 30s. */
   retryDelaysMs?: number[];
+  /** Epoch ms by which the review must finish (e.g. a serverless function's limit). Waits and timeouts stay inside it. */
+  deadline?: number;
+  /** Longest single wait for a rate-limited key to free up. Default 120s. */
+  maxWaitMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
 }
 
 const ResponseSchema = z.object({
@@ -42,6 +61,20 @@ const ResponseSchema = z.object({
 class OutOfRoomError extends ResolveError {
   constructor() {
     super("AI_ERROR", "The review ran out of room. Try a smaller change, or --fast.");
+  }
+}
+
+/** The API refused the key itself (invalid, revoked, API not enabled). */
+class KeyRejectedError extends ResolveError {
+  constructor() {
+    super("AI_NOT_CONFIGURED", "The Gemini API key was rejected. Check GEMINI_API_KEY.");
+  }
+}
+
+/** The model doesn't exist or this key can't use it. */
+class ModelUnavailableError extends ResolveError {
+  constructor(model: string) {
+    super("AI_ERROR", `The model “${model}” isn't available to this API key.`);
   }
 }
 
@@ -175,18 +208,41 @@ export function parseModelReview(text: string): ModelReview | null {
 }
 
 export class GemmaReviewer {
+  /** The primary model. */
   readonly model: string;
+  /** Primary first, then fallbacks. */
+  readonly models: readonly string[];
+  /** The model that wrote the last successful reply. */
+  lastModel: string | undefined;
   private readonly opts: ModelClientOptions;
+  private readonly pool: KeyPool;
+  private readonly now: () => number;
+  private readonly sleep: (ms: number) => Promise<void>;
+  /** Models found missing for this key set during this review. */
+  private readonly missing = new Set<string>();
 
   constructor(opts: ModelClientOptions) {
     const model = (opts.model || DEFAULT_REVIEW_MODEL).trim();
-    if (!MODEL_RE.test(model)) throw new ResolveError("INVALID_REQUEST", `“${model}” isn't a valid model name.`);
+    const fallbacks = (opts.fallbackModels ?? DEFAULT_FALLBACK_MODELS).map((m) => m.trim()).filter(Boolean);
+    for (const m of [model, ...fallbacks]) {
+      if (!MODEL_RE.test(m)) throw new ResolveError("INVALID_REQUEST", `“${m}” isn't a valid model name.`);
+    }
     this.model = model;
+    this.models = [...new Set([model, ...fallbacks])];
     this.opts = opts;
+    this.pool = opts.keyPool ?? new KeyPool(opts.apiKeys?.length ? opts.apiKeys : opts.apiKey ? [opts.apiKey] : []);
+    this.now = opts.now ?? Date.now;
+    this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  }
+
+  /** Milliseconds until some key can serve some model again (0 = now). */
+  readyIn(): number {
+    const now = this.now();
+    return Math.min(...this.models.filter((m) => !this.missing.has(m)).map((m) => this.pool.readyIn(m, now)));
   }
 
   async review(system: string, user: string): Promise<ModelReview> {
-    if (!this.opts.apiKey) {
+    if (this.pool.size === 0) {
       throw new ResolveError("AI_NOT_CONFIGURED", "Set GEMINI_API_KEY to run reviews. Get a key at https://aistudio.google.com/apikey.");
     }
     const contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [{ role: "user", parts: [{ text: user }] }];
@@ -203,30 +259,100 @@ export class GemmaReviewer {
     const review = parseModelReview(first);
     if (review) return review;
 
-    // One repair attempt: show the model its own reply and ask for the JSON only.
+    // One repair attempt: show the model its own reply and ask for the JSON only. Prefer the model that wrote it.
     contents.push(
       { role: "model", parts: [{ text: first.slice(0, 60_000) }] },
       { role: "user", parts: [{ text: "That reply wasn't a single valid JSON object in the required shape. Reply again with ONLY the JSON object." }] },
     );
-    const second = parseModelReview(await this.generate(system, contents, thinking));
+    const second = parseModelReview(await this.generate(system, contents, thinking, this.lastModel));
     if (second) return second;
-    throw new ResolveError("AI_ERROR", `${this.model} didn't return a review in the expected format. Please try again.`);
+    throw new ResolveError("AI_ERROR", `${this.lastModel ?? this.model} didn't return a review in the expected format. Please try again.`);
   }
 
-  /** Retry the model's temporary overload errors with backoff; everything else fails at once. */
-  private async generate(system: string, contents: unknown[], thinking: ThinkingLevel): Promise<string> {
+  /**
+   * Route one request across (model, key) pairs: every free key on the primary model, then on each fallback.
+   * Quota errors rest that key for that model; a rejected key is benched; overload moves on to the next model.
+   * When nothing is free, wait for the earliest key (inside the deadline) or for the overload backoff.
+   */
+  private async generate(system: string, contents: unknown[], thinking: ThinkingLevel, prefer?: string): Promise<string> {
     const delays = this.opts.retryDelaysMs ?? [10_000, 30_000];
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await this.generateOnce(system, contents, thinking);
-      } catch (err) {
-        if (!(err instanceof TransientModelError) || attempt >= delays.length) throw err instanceof TransientModelError ? err.cause : err;
-        await new Promise((r) => setTimeout(r, delays[attempt]));
+    const maxWait = this.opts.maxWaitMs ?? 120_000;
+    const order = prefer && this.models.includes(prefer) ? [prefer, ...this.models.filter((m) => m !== prefer)] : this.models;
+    let overloadRounds = 0;
+    let quotaWaits = 0;
+
+    for (;;) {
+      let lastError: unknown;
+      let overloaded = false;
+      for (const model of order) {
+        if (this.missing.has(model)) continue;
+        for (const i of this.pool.available(model, this.now())) {
+          try {
+            const text = await this.generateOnce(model, this.pool.key(i), system, contents, thinking);
+            this.pool.used(i);
+            this.lastModel = model;
+            return text;
+          } catch (err) {
+            lastError = err instanceof TransientModelError ? err.cause : err;
+            if (err instanceof ModelQuotaError) {
+              // Rejected requests still count against the rolling minute, so rest at least that long.
+              const rest = err.inputTokenLimit ? Math.max(err.retryAfter ?? 0, 90) : Math.max(err.retryAfter ?? 60, 5);
+              this.pool.coolDown(i, model, rest * 1000, this.now());
+              // An input-token cap is the same on every free-tier key: don't burn the rest on an oversized prompt.
+              if (err.inputTokenLimit) break;
+              continue;
+            }
+            if (err instanceof KeyRejectedError) {
+              this.pool.bench(i, 15 * 60_000, this.now());
+              continue;
+            }
+            if (err instanceof ModelUnavailableError) {
+              this.missing.add(model);
+              break;
+            }
+            if (err instanceof TransientModelError) {
+              overloaded = true;
+              break; // overload is model-wide: other keys won't help, the next model might
+            }
+            throw err;
+          }
+        }
       }
+
+      const remaining = this.remaining();
+      if (overloaded) {
+        const wait = delays[overloadRounds++];
+        if (wait === undefined || wait + 15_000 > remaining) throw lastError;
+        await this.sleep(wait);
+        continue;
+      }
+      if (lastError instanceof ModelQuotaError && lastError.inputTokenLimit) throw lastError; // the caller trims the prompt
+      if (this.pool.allBenched(this.now())) {
+        throw this.pool.size > 1 ? new ResolveError("AI_NOT_CONFIGURED", "Every Gemini API key was rejected. Check GEMINI_API_KEY(S).") : new KeyRejectedError();
+      }
+      if (this.models.every((m) => this.missing.has(m))) throw lastError ?? new ModelUnavailableError(this.model);
+
+      // Everything is rate limited (or was already resting): wait for the first key to free up.
+      const wait = this.readyIn();
+      if (Number.isFinite(wait) && wait <= maxWait && wait + 15_000 <= remaining && quotaWaits < 3) {
+        quotaWaits++;
+        await this.sleep(wait);
+        continue;
+      }
+      if (lastError) throw lastError;
+      const seconds = Number.isFinite(wait) ? Math.max(1, Math.ceil(wait / 1000)) : 60;
+      throw new ModelQuotaError(
+        `Every configured Gemini API key is rate limited right now. Try again in about ${seconds}s${this.pool.size === 1 ? ", or add more keys" : ""}.`,
+        { retryAfter: seconds },
+      );
     }
   }
 
-  private async generateOnce(system: string, contents: unknown[], thinking: ThinkingLevel): Promise<string> {
+  private remaining(): number {
+    return this.opts.deadline ? this.opts.deadline - this.now() : Infinity;
+  }
+
+  private async generateOnce(model: string, apiKey: string, system: string, contents: unknown[], thinking: ThinkingLevel): Promise<string> {
     const base = (this.opts.apiBase || GEMINI_API_BASE).replace(/\/+$/, "");
     const body = {
       systemInstruction: { parts: [{ text: system }] },
@@ -238,14 +364,16 @@ export class GemmaReviewer {
         thinkingConfig: { thinkingLevel: thinking },
       },
     };
+    const timeoutMs = Math.min(this.opts.timeoutMs ?? 600_000, this.remaining() - 2_000);
+    if (timeoutMs < 5_000) throw new ResolveError("TIMEOUT", "The review ran out of time. Try a smaller change or try again.");
     let res: Response;
     try {
       // Streamed: Gemma's thinking can run past Node fetch's 300s wait for response headers, but chunks keep a stream alive.
-      res = await (this.opts.fetch ?? fetch)(`${base}/models/${this.model}:streamGenerateContent?alt=sse`, {
+      res = await (this.opts.fetch ?? fetch)(`${base}/models/${model}:streamGenerateContent?alt=sse`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-goog-api-key": this.opts.apiKey! },
+        headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.opts.timeoutMs ?? 600_000),
+        signal: AbortSignal.timeout(timeoutMs),
         cache: "no-store",
       });
     } catch (err) {
@@ -257,12 +385,12 @@ export class GemmaReviewer {
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
       const message = /"message"\s*:\s*"([^"]{1,300})"/.exec(detail)?.[1];
-      if (res.status === 429) throw quotaErrorFrom(detail, this.model, res.headers.get("retry-after"));
-      if (res.status === 400 && /api key/i.test(detail)) throw new ResolveError("AI_NOT_CONFIGURED", "The Gemini API key was rejected. Check GEMINI_API_KEY.");
-      if (res.status === 401 || res.status === 403) throw new ResolveError("AI_NOT_CONFIGURED", "The Gemini API key was rejected. Check GEMINI_API_KEY.");
-      if (res.status === 404) throw new ResolveError("AI_ERROR", `The model “${this.model}” isn't available to this API key.`);
-      if (res.status === 500 || res.status === 503) {
-        throw new TransientModelError(new ResolveError("AI_ERROR", `${this.model} is overloaded right now (${res.status}). Please try again in a few minutes.`));
+      if (res.status === 429) throw quotaErrorFrom(detail, model, res.headers.get("retry-after"));
+      if (res.status === 400 && /api[ _]?key/i.test(detail)) throw new KeyRejectedError();
+      if (res.status === 401 || res.status === 403) throw new KeyRejectedError();
+      if (res.status === 404) throw new ModelUnavailableError(model);
+      if (res.status === 500 || res.status === 502 || res.status === 503 || res.status === 504) {
+        throw new TransientModelError(new ResolveError("AI_ERROR", `${model} is overloaded right now (${res.status}). Please try again in a few minutes.`));
       }
       throw new ResolveError("AI_ERROR", `The Gemini API returned an error (${res.status})${message ? `: ${message}` : "."}`);
     }

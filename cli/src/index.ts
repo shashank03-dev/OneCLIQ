@@ -23,7 +23,7 @@ import { lockPath, readLock, readLockOrEmpty, sha256File, syncOne, writeLock } f
 import { startMcpServer } from "./mcp";
 import { copyToClipboard, makeExecutable, openFile, revealFile } from "./open";
 import { GitError, localContext, originRepo } from "./git";
-import { GemmaReviewer, GitHubPrClient, ModelQuotaError, SEVERITY_LABELS, parseReviewTarget, reviewChange, type ReviewResult, type Severity } from "../../src/core/review";
+import { GemmaReviewer, GitHubPrClient, ModelQuotaError, SEVERITY_LABELS, parseApiKeys, parseReviewTarget, reviewChange, type ReviewResult, type Severity } from "../../src/core/review";
 import { loadInputLimit, loadState, saveInputLimit, stateDir, track, untrack } from "./state";
 import { detectSystem, type SystemInfo } from "./system";
 import { banner, c, card, gradient, isTTY, kv, relativeTime, table } from "./ui";
@@ -222,7 +222,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   review: {
     usage: "oqgit review [pr]",
-    about: "AI code review with Gemma 4. With nothing after it, reviews this branch's changes.\nGive a PR number for this repo, owner/repo#12, or any PR, branch or compare link.\nNeeds GEMINI_API_KEY (free key: https://aistudio.google.com/apikey).",
+    about: "AI code review with Gemma 4. With nothing after it, reviews this branch's changes.\nGive a PR number for this repo, owner/repo#12, or any PR, branch or compare link.\nNeeds GEMINI_API_KEY, or several keys in GEMINI_API_KEYS (free key: https://aistudio.google.com/apikey).",
     flags: [
       ["-g, --goal <text>", "what the change is meant to do"],
       ["--fast", "much quicker, less thorough"],
@@ -388,7 +388,8 @@ function fullHelp(): string {
     `  ${c.dim("$")} oqgit review --goal "add retry to uploads" --copy`,
     "",
     c.dim("Set GITHUB_TOKEN (or GH_TOKEN) to raise GitHub's API rate limit. OQGIT_MIN_AGE sets a default cooldown."),
-    c.dim("`review` needs GEMINI_API_KEY. OQGIT_REVIEW_MODEL changes the default model."),
+    c.dim("`review` needs GEMINI_API_KEY (or several, comma-separated, in GEMINI_API_KEYS: they rotate on rate limits)."),
+    c.dim("OQGIT_REVIEW_MODEL changes the model; OQGIT_REVIEW_FALLBACK_MODELS the fallbacks (\"none\" turns them off)."),
     c.dim("Set VIRUSTOTAL_API_KEY for malware hash checks; oqgit scans locally with ClamAV when it's installed."),
     c.dim("oqgit only downloads. It never installs or runs anything unless you choose to open a file."),
     "",
@@ -1591,9 +1592,18 @@ const SEVERITY_TONE: Record<Severity, (s: string) => string> = {
   nit: c.dim,
 };
 
+const reviewKeys = () => parseApiKeys(process.env.GEMINI_API_KEYS, process.env.GEMINI_API_KEY, process.env.GOOGLE_API_KEY);
+
+function fallbackModels(): string[] | undefined {
+  const raw = process.env.OQGIT_REVIEW_FALLBACK_MODELS?.trim();
+  if (!raw) return undefined;
+  return raw.toLowerCase() === "none" ? [] : raw.split(/[\s,]+/).filter(Boolean);
+}
+
 function reviewer(flags: Flags): GemmaReviewer {
   return new GemmaReviewer({
-    apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || undefined,
+    apiKeys: reviewKeys(),
+    fallbackModels: fallbackModels(),
     model: flags.model || process.env.OQGIT_REVIEW_MODEL || undefined,
     apiBase: process.env.OQGIT_GEMINI_API_BASE || undefined,
     thinking: flags.fast ? "minimal" : "high",
@@ -1605,8 +1615,8 @@ async function cmdReview(target: string | undefined, flags: Flags): Promise<numb
   const pr = flags.pr ? Number(flags.pr) : undefined;
   if (flags.pr && (!Number.isInteger(pr) || pr! < 1)) throw new UsageError("--pr must be a pull request number.");
   const model = reviewer(flags); // validates the model name before any GitHub calls
-  if (!process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
-    throw new ResolveError("AI_NOT_CONFIGURED", "Set GEMINI_API_KEY to run reviews. Get a free key at https://aistudio.google.com/apikey.");
+  if (reviewKeys().length === 0) {
+    throw new ResolveError("AI_NOT_CONFIGURED", "Set GEMINI_API_KEY (or GEMINI_API_KEYS) to run reviews. Get a free key at https://aistudio.google.com/apikey.");
   }
 
   if (interactive) header("review");
@@ -1652,7 +1662,7 @@ async function cmdReview(target: string | undefined, flags: Flags): Promise<numb
       maxInputTokens,
       onProgress: (e) => {
         void saveInputLimit(model.model, e.inputTokenLimit).catch(() => {});
-        const msg = `Your key allows ${e.inputTokenLimit.toLocaleString("en-US")} input tokens/min (free tier). Retrying in ${e.waitSeconds}s with the diff trimmed to fit${e.unreviewed ? ` (${e.unreviewed} files left out)` : ""}`;
+        const msg = `Your key allows ${e.inputTokenLimit.toLocaleString("en-US")} input tokens/min (free tier). ${e.waitSeconds > 0 ? `Retrying in ${e.waitSeconds}s` : "Retrying now"} with the diff trimmed to fit${e.unreviewed ? ` (${e.unreviewed} files left out)` : ""}`;
         if (spin) spin.message(msg);
         else if (!flags.json && !flags["prompt-only"]) console.error(msg);
       },
@@ -1665,7 +1675,7 @@ async function cmdReview(target: string | undefined, flags: Flags): Promise<numb
     }
     throw err;
   }
-  spin?.stop(`Reviewed by ${model.model}`);
+  spin?.stop(`Reviewed by ${result.model}${result.model !== model.model ? c.dim(` (fallback: ${model.model} was rate limited or busy)`) : ""}`);
 
   const code = flags.strict && !result.verdict.safeToMerge ? EXIT.policy : EXIT.ok;
   if (flags.json) {
