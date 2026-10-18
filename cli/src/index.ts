@@ -2,6 +2,7 @@ import * as p from "@clack/prompts";
 import os from "node:os";
 import path from "node:path";
 import { existsSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { GitHubClient } from "../../src/core/github";
 import { classifyAsset } from "../../src/core/match";
@@ -9,8 +10,11 @@ import { resolveDetailed } from "../../src/core/resolve";
 import { ResolveError } from "../../src/core/errors";
 import { KIND_LABELS, OS_LABELS, archLabel, formatBytes, noMatchMessage } from "../../src/core/labels";
 import { ARCH_VALUES, OS_VALUES, type Arch, type Os, type Platform, type ReleaseAsset } from "../../src/core/types";
-import { DownloadError, downloadAsset } from "./download";
+import { DownloadError, downloadAsset, type DownloadResult } from "./download";
 import { trustFor, verifyDigest } from "../../src/core/inspect";
+import { assessMalware, MALWARE_STATUS_LABELS, type LocalScanResult, type MalwareReport, type MalwareStatus } from "../../src/core/malware";
+import { VirusTotalClient } from "../../src/core/virustotal";
+import { findClamAv, scanFile } from "./clamav";
 import { LOCKFILE_NAME, checkLock, lockTool } from "../../src/core/lockfile";
 import { ALL_PLATFORMS, diffReleases, parseDuration, pickCooledRelease, platformKey } from "../../src/core/releases";
 import { TRUST_LEVEL_LABELS, humanDuration, type TrustReport } from "../../src/core/trust";
@@ -66,6 +70,8 @@ const OPTIONS = {
   "prompt-only": { type: "boolean" },
   strict: { type: "boolean" },
   fast: { type: "boolean" },
+  "no-malware": { type: "boolean" },
+  local: { type: "boolean" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "v" },
 } as const;
@@ -98,13 +104,15 @@ type Flags = {
   "prompt-only"?: boolean;
   strict?: boolean;
   fast?: boolean;
+  "no-malware"?: boolean;
+  local?: boolean;
   help?: boolean;
   version?: boolean;
 };
 
 const COMMANDS = [
   "get", "info", "list", "ls", "outdated", "update", "upgrade", "forget", "rm", "doctor", "help",
-  "trust", "diff", "verify", "lock", "sync", "mcp", "review",
+  "trust", "malware", "diff", "verify", "lock", "sync", "mcp", "review",
 ] as const;
 
 function help(): string {
@@ -126,6 +134,7 @@ function help(): string {
     "",
     c.bold("Supply chain"),
     cmd("trust", "<target>", "provenance report: attestations, immutability, re-uploads, age"),
+    cmd("malware", "<target>", "known-malware check: VirusTotal hash lookup, --local for ClamAV"),
     cmd("verify", "<file> -r <repo>", "is this file on disk really from that repo's releases?"),
     cmd("diff", "<repo> [from] [to]", "what changed between two releases' files"),
     "",
@@ -153,6 +162,8 @@ function help(): string {
     flag("--json", "machine-readable output"),
     flag("--no-track", "don't record this download"),
     flag("--min-age <3d|72h|1w>", "cooldown: skip releases younger than this"),
+    flag("--no-malware", "get: skip the malware check on the downloaded file"),
+    flag("--local", "malware: download to a temp folder and scan with local ClamAV"),
     flag("--fail-under <0-100>", "trust: exit 4 when the score is lower"),
     flag("-r, --repo <owner/repo>", "verify: the repo the file should come from"),
     flag(`--lock <file>`, `lockfile path (default ./${LOCKFILE_NAME})`),
@@ -182,6 +193,7 @@ function help(): string {
     "",
     c.dim("Set GITHUB_TOKEN (or GH_TOKEN) to raise GitHub's API rate limit. OQGIT_MIN_AGE sets a default cooldown."),
     c.dim("`review` needs GEMINI_API_KEY. OQGIT_REVIEW_MODEL changes the default model."),
+    c.dim("Set VIRUSTOTAL_API_KEY for malware hash checks; oqgit scans locally with ClamAV when it's installed."),
     c.dim("oqgit only downloads. It never installs or runs anything unless you choose to open a file."),
     "",
   ].join("\n");
@@ -195,6 +207,16 @@ function client(): GitHubClient {
   return new GitHubClient({
     token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN || undefined,
     apiBase: process.env.OQGIT_API_BASE || undefined,
+    timeoutMs: 15_000,
+    userAgent: `oqgit/${VERSION}`,
+  });
+}
+
+/** VirusTotal client for hash reputation. Only the SHA-256 ever leaves this machine. */
+function vtClient(): VirusTotalClient {
+  return new VirusTotalClient({
+    apiKey: process.env.VIRUSTOTAL_API_KEY?.trim() || undefined,
+    apiBase: process.env.OQGIT_VT_API_BASE || undefined,
     timeoutMs: 15_000,
     userAgent: `oqgit/${VERSION}`,
   });
@@ -248,6 +270,10 @@ function repoOf(target: string): { owner: string; repo: string } {
 
 function trustTone(level: TrustReport["level"]) {
   return level === "strong" ? c.ok : level === "fair" ? c.warn : c.bad;
+}
+
+function malwareTone(status: MalwareStatus): (s: string) => string {
+  return status === "flagged" ? c.bad : status === "no-known-detections" ? c.ok : status === "unknown" ? c.warn : c.dim;
 }
 
 function checkIcon(status: "pass" | "warn" | "info"): string {
@@ -418,6 +444,22 @@ function wrap(text: string, width: number): string[] {
   return out;
 }
 
+/**
+ * Malware check for a freshly downloaded file: VirusTotal hash reputation, falling back to a
+ * local ClamAV scan when VirusTotal can't be asked. Only a "flagged" verdict blocks.
+ */
+async function malwareGate(asset: ReleaseAsset, result: DownloadResult): Promise<MalwareReport> {
+  const vt = vtClient();
+  const sha256 = asset.digest ?? result.sha256;
+  const reputation = await vt.lookupHash(sha256);
+  let local: LocalScanResult | undefined;
+  if (reputation === null) {
+    const engine = await findClamAv();
+    if (engine) local = (await scanFile(result.path, engine)) ?? undefined;
+  }
+  return assessMalware({ sha256, reputation, local, reputationUnconfigured: !vt.enabled });
+}
+
 async function finishDownload(
   asset: ReleaseAsset,
   repo: { owner: string; name: string },
@@ -477,6 +519,34 @@ async function finishDownload(
 
   bar?.stop(`Downloaded ${formatBytes(result.bytes)} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 
+  let malware: MalwareReport | null = null;
+  if (!flags["no-malware"]) {
+    malware = await malwareGate(asset, result);
+    const warn = malware.checks.find((ch) => ch.status === "warn");
+    if (malware.status === "flagged" && !flags.force) {
+      await rm(result.path, { force: true });
+      const detail = warn?.detail ?? "engines flag this file as malicious.";
+      if (interactive) {
+        p.log.error(`${c.bad("Malware flagged")} — ${detail}`);
+        p.outro(c.dim(`The file was deleted. ${c.info(`oqgit malware ${repo.owner}/${repo.name}`)} for details; --force keeps it anyway.`));
+      } else if (flags.json) {
+        console.log(JSON.stringify({ ok: false, file: asset.name, malware, error: { code: "MALWARE_FLAGGED", message: detail } }, null, 2));
+      } else {
+        console.error(`Malware flagged: ${detail} The file was deleted. Use --force to keep it anyway.`);
+      }
+      return EXIT.policy;
+    }
+    if (interactive) {
+      const tone = malwareTone(malware.status);
+      const hint =
+        warn ? `  ${c.warn(warn.detail)}`
+        : malware.status === "unknown" || malware.status === "unavailable"
+          ? c.dim(`  · ${malware.checks.find((ch) => ch.id === "reputation")?.detail ?? ""}`)
+          : "";
+      p.log.message(`${c.dim("Malware")} ${tone(MALWARE_STATUS_LABELS[malware.status])}${hint}`);
+    }
+  }
+
   if (!flags["no-track"]) {
     await track({
       repo: `${repo.owner}/${repo.name}`,
@@ -492,11 +562,15 @@ async function finishDownload(
   }
 
   if (flags.json) {
-    console.log(JSON.stringify({ ok: true, file: result.path, bytes: result.bytes, sha256: result.sha256, verified: result.verified, tag }, null, 2));
+    console.log(JSON.stringify({ ok: true, file: result.path, bytes: result.bytes, sha256: result.sha256, verified: result.verified, tag, malware }, null, 2));
     return EXIT.ok;
   }
   if (!interactive) {
     console.log(`Saved ${result.path}\nsha256 ${result.sha256} (${result.verified === "match" ? "matches GitHub digest" : "no digest published"})`);
+    if (malware) {
+      const warn = malware.checks.find((ch) => ch.status === "warn");
+      console.log(`Malware ${MALWARE_STATUS_LABELS[malware.status]}${warn ? ` — ${warn.detail}` : ""}`);
+    }
     if (flags.open) await openFile(result.path);
     return EXIT.ok;
   }
@@ -883,6 +957,97 @@ async function cmdTrust(target: string | undefined, flags: Flags): Promise<numbe
 function meter(score: number): string {
   const n = Math.round(score / 5);
   return "█".repeat(n) + "░".repeat(20 - n);
+}
+
+// ---------------------------------------------------------------------------
+// malware
+// ---------------------------------------------------------------------------
+
+async function cmdMalware(target: string | undefined, flags: Flags): Promise<number> {
+  if (!target) throw new UsageError("Usage: oqgit malware <github url | owner/repo>");
+  const sys = detectSystem();
+  const platform = resolvePlatform(flags, sys);
+  const prefs = platform.os === sys.os ? { linuxPackage: sys.linuxPackage } : {};
+  const spin = isTTY && !flags.json ? p.spinner() : null;
+  if (spin) header("malware");
+  spin?.start(flags.local ? "Downloading a temp copy to scan with ClamAV" : "Checking hash reputation");
+
+  let details;
+  let file = "";
+  let digest: string | undefined;
+  let local: LocalScanResult | undefined;
+  let tmp: string | null = null;
+  try {
+    details = await resolveDetailed(
+      { url: targetUrl(target, flags.tag), platform, prefs, parse: { allowShorthand: true }, minAgeMs: minAgeMs(flags) },
+      client(),
+    );
+    const rec = details.response.recommendation;
+    if (rec.status !== "recommended") {
+      spin?.stop("No recommended file to check");
+      if (flags.json) console.log(JSON.stringify({ ...details.response, malware: null }, null, 2));
+      else console.error(`${c.bad("✖")} No file to check. ${noMatchMessage(rec.reason, platformText(platform))}`);
+      return EXIT.noMatch;
+    }
+    file = rec.asset.name;
+    const asset = details.release.assets.find((a) => a.name === file)!;
+    digest = asset.digest;
+
+    if (flags.local) {
+      const engine = await findClamAv();
+      if (!engine) {
+        throw new UsageError("ClamAV wasn't found. Install it, point OQGIT_CLAMSCAN at it, or drop --local for a VirusTotal-only check.");
+      }
+      spin?.message(`Scanning ${file} with ${engine.version} (temp copy)`);
+      tmp = await mkdtemp(path.join(os.tmpdir(), "oqgit-scan-"));
+      const res = await downloadAsset({ url: asset.downloadUrl, fileName: asset.name, dir: tmp, expectedSize: asset.size, digest: asset.digest });
+      digest = res.sha256;
+      local = (await scanFile(res.path, engine)) ?? undefined;
+      if (!local) spin?.message("The local scan couldn't run; continuing without it");
+    }
+  } catch (err) {
+    spin?.error(err instanceof ResolveError || err instanceof UsageError ? err.message : "Lookup failed");
+    throw err;
+  } finally {
+    if (tmp) await rm(tmp, { recursive: true, force: true });
+  }
+
+  const vt = vtClient();
+  const reputation = digest ? await vt.lookupHash(digest) : null;
+  const report = assessMalware({ sha256: digest, reputation, local, reputationUnconfigured: !vt.enabled });
+  const r = details.response;
+  spin?.stop(`${r.repo.owner}/${r.repo.name}  ${c.bold(r.release.tag)}  ${c.dim(file)}`);
+
+  if (flags.json) {
+    console.log(JSON.stringify({ repo: r.repo, release: r.release, file, malware: report }, null, 2));
+    return report.status === "flagged" ? EXIT.policy : EXIT.ok;
+  }
+
+  const tone = malwareTone(report.status);
+  const width = Math.max(...report.checks.map((ch) => ch.label.length));
+  const lines = [
+    tone(c.bold(MALWARE_STATUS_LABELS[report.status])),
+    c.dim(file),
+    "",
+    ...report.checks.flatMap((ch) => {
+      const body = wrap(ch.detail, Math.max(28, Math.min(process.stdout.columns || 80, 92) - 14 - width));
+      return [`${checkIcon(ch.status)} ${ch.label.padEnd(width)}  ${body[0] ?? ""}`, ...body.slice(1).map((l) => `  ${" ".repeat(width)}  ${l}`)];
+    }),
+  ];
+  console.log(
+    card(lines, report.status === "flagged" ? "bad" : report.status === "no-known-detections" ? "ok" : "warn", `${r.repo.owner}/${r.repo.name} ${r.release.tag}`),
+  );
+  console.log("");
+  if (report.permalink) console.log(`  ${c.dim("Engine results:")} ${c.info(report.permalink)}`);
+  if (flags.local) console.log(`  ${c.dim("Scanned a temp copy with local ClamAV; nothing was installed and the copy was deleted.")}`);
+  else if (!vt.enabled) console.log(`  ${c.dim("Set VIRUSTOTAL_API_KEY for hash reputation, or add --local to scan a temp copy with ClamAV.")}`);
+  console.log(`  ${c.dim("Known malware only — new or rare malware is often missed. One signal, not a verdict.")}`);
+  console.log("");
+  if (report.status === "flagged") {
+    console.error(`${c.bad("✖")} Flagged. Don't open or install this file.`);
+    return EXIT.policy;
+  }
+  return EXIT.ok;
 }
 
 // ---------------------------------------------------------------------------
@@ -1362,6 +1527,7 @@ async function menu(flags: Flags): Promise<number> {
         { value: "outdated", label: "Check for updates" },
         { value: "trust", label: "Trust report", hint: "attestations, immutability, re-uploads" },
         { value: "review", label: "Review code", hint: "a PR, a branch, or this repo's changes" },
+        { value: "malware", label: "Malware check", hint: "VirusTotal hash lookup, optional local scan" },
         { value: "doctor", label: "Doctor", hint: "system, token, API quota" },
         { value: "help", label: "Help" },
       ],
@@ -1381,6 +1547,10 @@ async function menu(flags: Flags): Promise<number> {
       await p.text({ message: "PR or branch link (leave empty to review this repo's branch)", placeholder: "https://github.com/owner/repo/pull/12" }),
     );
     return cmdReview(t?.trim() || undefined, flags);
+  }
+  if (choice === "malware") {
+    const t = exitOnCancel(await p.text({ message: "GitHub repository or release URL", placeholder: "owner/repo" }));
+    return cmdMalware(t, flags);
   }
   if (choice === "list") return cmdList(flags);
   if (choice === "outdated") return cmdOutdated(flags);
@@ -1450,6 +1620,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         return await cmdDoctor(flags);
       case "trust":
         return await cmdTrust(second, flags);
+      case "malware":
+        return await cmdMalware(second, flags);
       case "diff":
         return await cmdDiff(second, rest[0], rest[1], flags);
       case "verify":
@@ -1463,6 +1635,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       case "mcp":
         await startMcpServer({
           client,
+          vt: vtClient,
           system: detectSystem(),
           version: VERSION,
           allowDownload: !!flags["allow-download"],

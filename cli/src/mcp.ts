@@ -11,12 +11,13 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import type { GitHubClient } from "../../src/core/github";
 import { checkLock } from "../../src/core/lockfile";
-import { trustFor, verifyDigest } from "../../src/core/inspect";
+import { malwareFor, trustFor, verifyDigest } from "../../src/core/inspect";
 import { diffReleases, parseDuration } from "../../src/core/releases";
 import { resolveDetailed } from "../../src/core/resolve";
 import { parseGitHubUrl } from "../../src/core/parse-url";
 import { ResolveError } from "../../src/core/errors";
 import { ARCH_VALUES, OS_VALUES, type Arch, type Os, type Platform } from "../../src/core/types";
+import type { VirusTotalClient } from "../../src/core/virustotal";
 import { downloadAsset } from "./download";
 import { lockPath, readLock, sha256File } from "./lock";
 import type { SystemInfo } from "./system";
@@ -25,6 +26,8 @@ export const MCP_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", 
 
 interface Deps {
   client: () => GitHubClient;
+  /** VirusTotal hash reputation; disabled (no key) is fine — the report says so. */
+  vt: () => VirusTotalClient;
   system: SystemInfo;
   version: string;
   allowDownload: boolean;
@@ -61,6 +64,8 @@ function str(args: Json, key: string, required = false): string | undefined {
 }
 
 export function buildTools(deps: Deps): Tool[] {
+  // One client per server: all tools share its outbound quota and in-flight lookups.
+  const vt = deps.vt();
   const platformOf = (args: Json): Platform => {
     const os = (str(args, "os") ?? deps.system.os) as Os | null;
     const arch = (str(args, "arch") ?? deps.system.arch) as Arch | null;
@@ -116,6 +121,20 @@ export function buildTools(deps: Deps): Tool[] {
         if (d.response.recommendation.status !== "recommended") return { recommendation: d.response.recommendation };
         const asset = d.release.assets.find((a) => a.name === (d.response.recommendation as { asset: { name: string } }).asset.name)!;
         return { release: d.response.release, file: asset.name, trust: await trustFor(deps.client(), d.target, d.release, asset) };
+      },
+    },
+    {
+      name: "check_malware",
+      description:
+        "Check the file this machine would download against VirusTotal: how many engines flag its SHA-256 as malicious or suspicious, with the top detections. Complements release_trust. Only the hash is sent; a clean result covers known malware only and never proves safety.",
+      inputSchema: { type: "object", properties: { target, tag: { type: "string" }, ...platformProps }, required: ["target"] },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      run: async (args) => {
+        const d = await resolveFor(args);
+        const rec = d.response.recommendation;
+        if (rec.status !== "recommended") return { recommendation: rec, file: null, malware: null };
+        const asset = d.release.assets.find((a) => a.name === rec.asset.name)!;
+        return { release: d.response.release, file: asset.name, malware: await malwareFor(vt, asset.digest) };
       },
     },
     {
@@ -191,7 +210,13 @@ export function buildTools(deps: Deps): Tool[] {
         }
         const dir = path.resolve(deps.cwd, str(args, "dir") ?? path.join(".oqgit", "downloads"));
         const res = await downloadAsset({ url: asset.downloadUrl, fileName: asset.name, dir, expectedSize: asset.size, digest: asset.digest, overwrite: true });
-        return { downloaded: true, ...res, tag: d.release.tag, trust: { level: trust.level, score: trust.score } };
+        return {
+          downloaded: true,
+          ...res,
+          tag: d.release.tag,
+          trust: { level: trust.level, score: trust.score },
+          malware: await malwareFor(vt, res.sha256),
+        };
       },
     });
   }
@@ -216,7 +241,7 @@ export async function handleMessage(msg: Json, tools: Tool[], version: string): 
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "oqgit", title: "oqgit — GitHub release resolver", version },
         instructions:
-          "Use resolve_release to get the right binary for a GitHub project instead of guessing asset URLs, and release_trust before installing it. Files are never executed by this server.",
+          "Use resolve_release to get the right binary for a GitHub project instead of guessing asset URLs, release_trust before installing it, and check_malware to see whether antivirus engines flag the file. Files are never executed by this server.",
       });
     }
     case "ping":

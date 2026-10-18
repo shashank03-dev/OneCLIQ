@@ -4,9 +4,9 @@
 
 GitHub releases can contain dozens of files for different systems. OneCLIQ reads a repository's releases and suggests the file that best matches your operating system and CPU.
 
-Use the **web app** to paste a GitHub link, check the suggested system, and open the selected download on GitHub. Use the **`oqgit` command-line tool** to download files, keep track of them, check hashes and provenance, and pin releases for a team.
+Use the **web app** to paste a GitHub link, check the suggested system, see a known-malware check for the file, and open the selected download on GitHub. Use the **`oqgit` command-line tool** to download files, keep track of them, check hashes and provenance, check known-malware reputation, and pin releases for a team.
 
-**A recommendation is about compatibility, not safety.** OneCLIQ does not scan software for malware. The web app does not install anything. The CLI saves files to disk, and only opens them when you ask it to.
+**A recommendation is about compatibility, not safety.** OneCLIQ can check files for **known** malware — the web app looks up published hashes with VirusTotal, and the CLI can also scan downloads with a local antivirus engine — but a clean result is never proof that software is harmless. The web app does not install anything. The CLI saves files to disk, and only opens them when you ask it to.
 
 ## Quick start
 
@@ -51,9 +51,10 @@ The stack is Next.js 16, React 19, TypeScript, Tailwind CSS 4, Zod, Vitest, and 
 | `src/core/resolve.ts` | Connects parsing, release selection, and matching. |
 | `src/core/review/` | AI code review: PR/branch context, Gemma 4 call, verdict, and fix prompt. Used by `oqgit review` and `/api/review`. |
 | `src/core/trust.ts`, `src/core/inspect.ts` | Calculate trust reports, check attestations, and match file digests. |
+| `src/core/malware.ts`, `src/core/virustotal.ts` | Known-malware verdicts from VirusTotal hash reputation and optional local scans. |
 | `src/core/releases.ts`, `src/core/lockfile.ts` | Release cooldowns, comparisons, file pins, and drift detection. |
-| `src/app/`, `src/components/` | Web pages, three API routes, resolver interface, and browser file verifier. |
-| `src/server/` | Server-side GitHub access, request parsing, and rate limiting. |
+| `src/app/`, `src/components/` | Web pages, four API routes, resolver interface, browser file verifier, and malware panel. |
+| `src/server/` | Server-side GitHub and VirusTotal access, request parsing, and rate limiting. |
 | `cli/src/` | Commands, downloads, tracking, lockfile sync, and MCP server. |
 | `tests/unit/`, `e2e/` | Unit tests and desktop/mobile browser tests. |
 
@@ -70,25 +71,28 @@ cp .env.example .env.local
 | Variable | Purpose |
 | --- | --- |
 | `GITHUB_TOKEN` | Server-side token to raise GitHub's API quota. Public repositories do not require token permissions. Keep it private. |
+| `VIRUSTOTAL_API_KEY` | Server-side VirusTotal key for known-malware hash lookups. Optional; without it the panel reports the check as unavailable. The free public API allows about 4 lookups/minute and 500/day. |
 | `NEXT_PUBLIC_SITE_URL` | Public base URL used for absolute metadata URLs. Set it to your deployment's actual address. |
-| `RESOLVE_RATE_LIMIT_PER_MIN` | Requests per minute per IP and per server instance, across all three API routes. Default: `30`. |
+| `RESOLVE_RATE_LIMIT_PER_MIN` | Requests per minute per IP and per server instance, across all five API routes. Default: `30`. |
 | `GITHUB_API_BASE_URL` | Test-only override for a mock GitHub API. Leave it unset in production. |
 | `GEMINI_API_KEY` | Enables `/review` and `/api/review` (Gemma 4 code review). Without it, the page explains that reviews aren't enabled. Keep it private. |
 | `REVIEW_MODEL` | Model for web reviews. Default: `gemma-4-31b-it`. |
 | `REVIEW_THINKING` | `high` (default, thorough, can take minutes) or `minimal` (much faster). |
 | `REVIEW_RATE_LIMIT_PER_MIN` | Reviews per minute per IP and per server instance, on top of the general limit. Default: `3`. |
 | `GEMINI_API_BASE_URL` | Test-only override for a mock Gemini API. Leave it unset in production. |
+| `VIRUSTOTAL_API_BASE_URL` | Test-only override for a mock VirusTotal API. Leave it unset in production. |
 
-The CLI reads `GITHUB_TOKEN` or `GH_TOKEN`. It also supports `OQGIT_MIN_AGE` for a default release cooldown and `OQGIT_HOME` for its tracking directory. `OQGIT_API_BASE` is a CLI API override intended for tests. `oqgit review` reads `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) and `OQGIT_REVIEW_MODEL`.
+The CLI reads `GITHUB_TOKEN` or `GH_TOKEN`. It also reads `VIRUSTOTAL_API_KEY` for hash reputation and `OQGIT_CLAMSCAN` to point at a specific ClamAV binary, and supports `OQGIT_MIN_AGE` for a default release cooldown and `OQGIT_HOME` for its tracking directory. `OQGIT_API_BASE` and `OQGIT_VT_API_BASE` are CLI API overrides intended for tests. `oqgit review` reads `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) and `OQGIT_REVIEW_MODEL`.
 
 ## HTTP API
 
-All four endpoints are **POST** routes. They require a JSON body with `Content-Type: application/json`. The code limits request bodies to 4,096 characters and also checks a declared content length. Responses use `Cache-Control: no-store`.
+All five endpoints are **POST** routes. They require a JSON body with `Content-Type: application/json`. The code limits request bodies to 4,096 characters and also checks a declared content length. Responses use `Cache-Control: no-store`.
 
 | Route | Request JSON | Successful response |
 | --- | --- | --- |
 | `/api/resolve` | `{"url":"https://github.com/sharkdp/bat","os":"linux","arch":"x64"}` | `ok`, `repo`, `release`, `platform`, `recommendation`. |
 | `/api/trust` | Same `url`, `os`, and `arch` fields | `ok`, `file`, `tag`, `trust` with level, score, checks, and sometimes a verification command. |
+| `/api/malware` | Same `url`, `os`, and `arch` fields | `ok`, `file`, `tag`, `malware` with status, checks, and sometimes a VirusTotal link. |
 | `/api/verify` | `{"repo":"owner/repo","sha256":"{64 hex characters}"}` | `ok`, `repo`, `sha256`, `scanned`, `match`, `attestations`. |
 | `/api/review` | `{"url":"https://github.com/owner/repo/pull/12","goal":"optional"}` | `ok`, `model`, `change`, `title`, `summary`, `intent`, `verdict` (`safeToMerge`, `readyToMerge`, `label`, `blockers`, `counts`), `findings`, `testsToAdd`, `fixPrompt`. |
 
@@ -107,6 +111,8 @@ An `ok: true` resolution may include `recommendation.status: "recommended"` with
 Failures return an `ok: false` object with an `error.code` and `error.message`. Defined codes include `INVALID_URL`, `INVALID_REQUEST`, `REPO_NOT_FOUND`, `RELEASE_NOT_FOUND`, `NO_RELEASES`, `NO_STABLE_RELEASE`, `RATE_LIMITED`, `TIMEOUT`, `NETWORK`, `UPSTREAM`, `PR_NOT_FOUND`, `AI_NOT_CONFIGURED`, and `AI_ERROR`. Rate-limited responses can include `retryAfter` in seconds and a `Retry-After` header.
 
 `/api/verify` checks up to the most recent **100 releases** for an asset with the exact SHA-256. A missing match may mean an older release or a file without a GitHub-published digest. It does not prove that a file is malicious.
+
+`/api/malware` reads the SHA-256 GitHub published for the recommended file and asks VirusTotal about it — the file itself is never uploaded or downloaded by this route. When no key is configured, VirusTotal is unavailable, or GitHub published no digest, the report says so instead of guessing. `flagged` means engines report known malware; the other statuses are `no-known-detections`, `unknown`, and `unavailable` — never "safe".
 
 `/api/review` accepts pull request (any state), `/tree/{branch}`, and `/compare/{base}...{head}` links for **public** repositories only, even if the server's `GITHUB_TOKEN` could read private ones. The diff is sent to Google's Gemini API. Use `oqgit review` for private repositories and local branches.
 
@@ -139,6 +145,7 @@ Run `oqgit` with no arguments in an interactive terminal for a menu. `oqgit owne
 | `oqgit forget owner/repo` | Stop tracking without removing files from disk. |
 | `oqgit doctor` | Show system information, token status, and GitHub API quota. |
 | `oqgit trust owner/repo` | Get a provenance report for the selected file. |
+| `oqgit malware owner/repo` | Check the selected file's hash against VirusTotal; `--local` scans a temp copy with ClamAV. |
 | `oqgit verify ./file -r owner/repo` | Hash a local file and find its matching published release asset, if any. |
 | `oqgit diff owner/repo [from] [to]` | Compare two releases' files, sizes, and platform coverage. |
 | `oqgit lock add owner/repo` | Pin assets for available OS and CPU combinations in `oqgit.lock.json`. |
@@ -149,7 +156,7 @@ Run `oqgit` with no arguments in an interactive terminal for a menu. `oqgit owne
 | `oqgit sync` | Download this machine's locked assets. |
 | `oqgit mcp` | Run a Model Context Protocol server over standard input and output. |
 
-Helpful flags include `--os`, `--arch`, `-t/--tag`, `-o/--out`, `-n/--dry-run`, `-y/--yes`, `-f/--force`, `--json`, `--min-age`, `--no-track`, and `--no-trust`. Use `oqgit --help` for the complete list. In noninteractive mode, `get` requires `--yes` to download.
+Helpful flags include `--os`, `--arch`, `-t/--tag`, `-o/--out`, `-n/--dry-run`, `-y/--yes`, `-f/--force`, `--json`, `--min-age`, `--no-track`, `--no-trust`, `--no-malware`, and `--local`. Use `oqgit --help` for the complete list. In noninteractive mode, `get` requires `--yes` to download.
 
 Some examples:
 
@@ -159,15 +166,17 @@ oqgit get sharkdp/bat --yes
 oqgit info neovim/neovim --os windows
 oqgit get sharkdp/bat --min-age 3d
 oqgit trust cli/cli --fail-under 60 --json
+oqgit malware cli/cli
+oqgit malware cli/cli --local
 oqgit verify ./downloaded-file -r owner/repo
 oqgit lock add cli/cli sharkdp/bat
 oqgit lock check
 oqgit sync
 ```
 
-For `verify`, replace `./downloaded-file` and `owner/repo` with your own file and its expected source repository. `--min-age 3d` skips stable releases less than three days old but does not apply to a specifically requested tag. `--fail-under 60` makes `trust` exit with a policy failure when the score is lower than 60.
+For `verify`, replace `./downloaded-file` and `owner/repo` with your own file and its expected source repository. `--min-age 3d` skips stable releases less than three days old but does not apply to a specifically requested tag. `--fail-under 60` makes `trust` exit with a policy failure when the score is lower than 60. `oqgit malware owner/repo` checks the recommended file's published hash; add `--local` to download a temporary copy and scan it with an installed ClamAV.
 
-Exit codes: `0` success, `1` general error, `2` invalid usage or URL, `3` no reliable file match, `4` failed trust, verification, or lock policy.
+Exit codes: `0` success, `1` general error, `2` invalid usage or URL, `3` no reliable file match, `4` failed trust, verification, lock, or malware policy.
 
 ### Downloads and tracked state
 
@@ -175,11 +184,13 @@ By default, downloads go to `~/Downloads` if that folder exists, or to the curre
 
 Downloads go to a temporary `.part` file. The CLI checks file size and computes SHA-256, comparing it to GitHub's published digest **when available**. If the digest disagrees, the temporary file is deleted. Without a published digest, the CLI can check only the file size against GitHub's metadata. Existing files are protected unless you use `--force`.
 
+After a download completes, `get` checks the file for **known** malware: it looks up the file's SHA-256 with VirusTotal and, when VirusTotal cannot answer and ClamAV is installed, falls back to a local scan of the downloaded bytes. Only hashes are sent to VirusTotal; local scans stay on your machine. If engines flag the file, the download is deleted and the command exits with code `4`. `--force` keeps a flagged file anyway, and `--no-malware` skips the check.
+
 ### Lockfiles and agents
 
 `oqgit lock add` writes the selected file name, URL, size, and available GitHub digest for each supported platform combination. Commit `oqgit.lock.json` if you want teammates and CI to use the same release selection. `oqgit lock check` spots removed or changed files. `oqgit sync` saves locked downloads under `.oqgit/downloads/` and compares them to the digest saved in the lockfile when present. `--extract` optionally unpacks ZIP or TAR archives using the system's `unzip` or `tar`; inspect untrusted archives before extracting.
 
-`oqgit mcp` offers the tools `resolve_release`, `release_trust`, `release_diff`, `verify_file`, and `lock_check`. It is read-only by default. Starting it with `--allow-download` also exposes `download_release`; weak-provenance files require an explicit `allow_weak` argument. The MCP server downloads files but never runs them.
+`oqgit mcp` offers the tools `resolve_release`, `release_trust`, `check_malware`, `release_diff`, `verify_file`, and `lock_check`. It is read-only by default. Starting it with `--allow-download` also exposes `download_release`; weak-provenance files require an explicit `allow_weak` argument. The MCP server downloads files but never runs them.
 
 ## Trust and security
 
@@ -187,12 +198,15 @@ The trust report evaluates eight signals from GitHub's available metadata: build
 
 A higher score means more of those signals are present or reassuring. **It does not establish that the software is safe.** OneCLIQ looks up attestation records but does not verify their complete Sigstore signatures. When it finds build attestations it can suggest a separate `gh attestation verify` command.
 
+The malware check is deliberately narrow. The web app and the MCP server ask VirusTotal about the file's published SHA-256; the CLI additionally scans downloaded bytes with a locally installed ClamAV when VirusTotal cannot answer, and `oqgit malware --local` can scan a temporary copy on demand. Detections cover **known** malware only — zero detections never proves a file harmless, which is why the report says "no known detections" rather than "safe". A free VirusTotal key is subject to VirusTotal's terms; review them before using it in a shared or commercial deployment.
+
 The implementation also uses these safeguards:
 
 - GitHub API paths are constructed from validated repository and tag values.
 - Download URLs must be HTTPS GitHub release links. The CLI checks each redirect against an allowed set of GitHub asset hosts.
 - API inputs are schema-validated and size-limited. Responses use `Cache-Control: no-store`, and security headers are configured in `next.config.ts`.
 - The GitHub token stays in the server-side client, outside the browser bundle.
+- Malware lookups send only the file's SHA-256 to VirusTotal — never file contents. Local ClamAV scans run entirely offline.
 - The CLI opens a file with the operating system only when you explicitly request it, such as with `--open`. That action may launch an installer, so review the file before opening it.
 
 To report a security concern, follow [SECURITY.md](SECURITY.md). Avoid publishing sensitive details in a public issue.
@@ -218,15 +232,15 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-`npm run test:e2e` makes a production build first. It is **not** part of `npm run check`. Unit tests cover URLs, filename matching, GitHub API behavior, CLI downloads, trust and lock functions, and MCP requests. When changing those behaviors, update the corresponding tests in `tests/unit/`.
+`npm run test:e2e` makes a production build first. It is **not** part of `npm run check`. Unit tests cover URLs, filename matching, GitHub API behavior, CLI downloads, trust, lock, and malware functions, and MCP requests. When changing those behaviors, update the corresponding tests in `tests/unit/`.
 
 ## Deployment
 
 ### Vercel
 
-Import the repository as a Next.js project and keep the default build settings. Add `GITHUB_TOKEN` to your server-side deployment environment if you expect sustained API traffic. Set `NEXT_PUBLIC_SITE_URL` to the actual public site address for correct metadata URLs. Deploy and test with a public GitHub repository.
+Import the repository as a Next.js project and keep the default build settings. Add `GITHUB_TOKEN` to your server-side deployment environment if you expect sustained API traffic. Add `VIRUSTOTAL_API_KEY` to enable the malware hash checks; without it the panel reports the check as unavailable. Set `NEXT_PUBLIC_SITE_URL` to the actual public site address for correct metadata URLs. Deploy and test with a public GitHub repository.
 
-Do not set the test-only `GITHUB_API_BASE_URL` in production.
+Do not set the test-only `GITHUB_API_BASE_URL` or `VIRUSTOTAL_API_BASE_URL` in production.
 
 ### Another Node.js host
 
@@ -240,14 +254,14 @@ npm start
 
 Set `PORT` through your host when needed and serve the site over HTTPS. The application uses server-side API routes, so it needs a running Node.js application rather than static file hosting.
 
-Rate-limit counters and release metadata caches are **in memory per server instance**. A multi-instance deployment will need a shared store if it requires globally consistent rate limits. The per-IP limiter also depends on the proxy providing trustworthy client IP headers.
+Rate-limit counters, release metadata caches, and the VirusTotal lookup budget (about 4/minute and 500/day by default) are **in memory per server instance**. A multi-instance deployment will need a shared store if it requires globally consistent rate limits. The per-IP limiter also depends on the proxy providing trustworthy client IP headers.
 
 ## Current limitations
 
 - **Public repositories only.** Private GitHub repositories and GitHub Enterprise servers are unsupported.
 - **Name-based decisions.** Unusual or contradictory asset names may prevent an automatic recommendation. The release page remains available for manual inspection.
 - **Release history limits.** Fallback release selection examines up to 30 recent releases; verification checks up to 100. Assets without a GitHub-published SHA-256 cannot match the verifier.
-- **Not a malware scanner.** A good trust score, matching digest, or listed attestation cannot guarantee harmless software.
+- **Known malware only.** The malware check reports what VirusTotal engines and an optional local ClamAV scan already know about. Zero detections never proves a file harmless, and new or rare malware is often missed. Assets without a GitHub-published SHA-256 (common before mid-2025) cannot be looked up at all.
 - **Browser detection.** macOS CPU detection can be uncertain, and browser code cannot determine a Linux package distribution. The CLI reads `/etc/os-release` to help prefer `.deb` or `.rpm`.
 - **Large-file browser verification.** The web verifier reads the file into memory and rejects files over 2 GiB. Use `oqgit verify` for larger files.
 - **Limited integrity data.** Without a GitHub-published digest, CLI downloads and lockfile sync use size checks rather than cryptographic verification against a publisher-provided digest.

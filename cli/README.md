@@ -1,8 +1,8 @@
 # oqgit
 
-`oqgit` is the command-line tool for [OneCLIQ](https://github.com/shashank03-dev/OneCLIQ). It finds the GitHub release file that matches your computer, downloads it from GitHub, and can check the file's integrity. It can also track downloads, compare releases, create a lockfile for a team, and serve tools to coding agents over MCP.
+`oqgit` is the command-line tool for [OneCLIQ](https://github.com/shashank03-dev/OneCLIQ). It finds the GitHub release file that matches your computer, downloads it from GitHub, and can check the file's integrity and known-malware reputation. It can also track downloads, compare releases, create a lockfile for a team, and serve tools to coding agents over MCP.
 
-**A match is not a safety guarantee.** `oqgit` uses filenames and GitHub metadata to choose a file. It does not scan software for malware or install it. Opening a downloaded file is a separate, explicit action.
+**A match is not a safety guarantee.** `oqgit` uses filenames and GitHub metadata to choose a file, and it checks downloads for **known** malware — a VirusTotal hash lookup and, when VirusTotal can't answer and ClamAV is installed, a local scan. No check proves software harmless, and `oqgit` never installs anything. Opening a downloaded file is a separate, explicit action.
 
 ## Install from source
 
@@ -63,6 +63,7 @@ A tag is an example: specify a tag that exists in the chosen repository. Without
 | `oqgit forget <owner/repo>` | Stop tracking a tool without deleting its downloaded files. |
 | `oqgit doctor` | Show platform detection, local directories, token status, and API quota. |
 | `oqgit trust <target>` | Explain provenance signals for a release file. |
+| `oqgit malware <target>` | Check the selected file's hash against VirusTotal; `--local` scans a temp copy with ClamAV. |
 | `oqgit verify <file> -r owner/repo` | Hash a local file and look for its exact digest in a repository's releases. |
 | `oqgit diff <repo> [from] [to]` | Compare assets and platform coverage across two releases. |
 | `oqgit lock add <target...>` | Add repository releases and matching platform assets to `oqgit.lock.json`. |
@@ -75,9 +76,9 @@ A tag is an example: specify a tag that exists in the chosen repository. Without
 
 `<target>` accepts a GitHub repository or release URL, or `owner/repo`. Run `oqgit --help` for flags and more examples. Running `oqgit owner/repo` is shorthand for `oqgit get owner/repo`.
 
-Common options include `--os`, `--arch`, `--tag`, `--out`, `--yes`, `--dry-run`, `--force`, `--no-track`, `--json`, `--min-age`, `--no-trust`, and `--open`. The `--open` flag asks the operating system to open the downloaded file, which might launch an installer; use it only for files you trust.
+Common options include `--os`, `--arch`, `--tag`, `--out`, `--yes`, `--dry-run`, `--force`, `--no-track`, `--json`, `--min-age`, `--no-trust`, `--no-malware`, `--local`, and `--open`. The `--open` flag asks the operating system to open the downloaded file, which might launch an installer; use it only for files you trust.
 
-Exit codes are `0` for success, `1` for an error, `2` for invalid input, `3` for no reliable match, and `4` for a failed trust or integrity policy.
+Exit codes are `0` for success, `1` for an error, `2` for invalid input, `3` for no reliable match, and `4` for a failed trust, integrity, or malware policy.
 
 ## Trust and file verification
 
@@ -87,13 +88,17 @@ oqgit verify ./downloaded-file -r owner/repo
 oqgit get sharkdp/bat --min-age 3d --dry-run
 ```
 
-`trust` produces a report from available GitHub information, including release age, published digests, attestations, immutable-release status, and changes to published files. It is a set of signals, not an antivirus scan or a verified signature verdict. When GitHub lists an attestation, `oqgit` can show a `gh attestation verify` command for a separate cryptographic verification.
+`trust` produces a report from available GitHub information, including release age, published digests, attestations, immutable-release status, and changes to published files. It is a set of signals, not a verified signature verdict — run `oqgit malware` for known-malware evidence. When GitHub lists an attestation, `oqgit` can show a `gh attestation verify` command for a separate cryptographic verification.
 
 `verify` calculates the SHA-256 digest of the local file and searches recent GitHub releases for a matching published asset digest. If no match appears, the file may be older than the scanned history or its publisher may not have provided a digest. A failed lookup alone does not mean the file is malicious.
 
 `--min-age 3d` skips newer stable releases while resolving a repository. Set `OQGIT_MIN_AGE` in your environment to make a cooldown the default. An explicit release tag is still resolved as requested.
 
-Downloads go first to a temporary `.part` file. The CLI checks the expected size and, when GitHub publishes one, its SHA-256 digest before renaming the completed download. It only follows redirects to approved GitHub asset hosts. When a digest is missing, the CLI cannot provide the same integrity assurance.
+`oqgit malware owner/repo` looks up the SHA-256 GitHub published for the recommended file in VirusTotal and lists engine detections. Add `--local` to also download a copy to a temporary folder, scan it with an installed ClamAV, and delete the copy. Only hashes are sent to VirusTotal; local scans stay on your machine. Exit code `4` means engines flagged the file.
+
+`oqgit get` runs the same check automatically after downloading. When engines flag the file, the download is deleted and the command exits with code `4`; `--force` keeps a flagged file anyway, and `--no-malware` skips the check. Detections cover known malware only — a clean result is not proof of safety.
+
+Downloads go first to a temporary `.part` file. The CLI checks the expected size and, when GitHub publishes one, its SHA-256 digest before renaming the completed download. It only follows redirects to approved GitHub asset hosts. When a digest is missing, the CLI cannot provide the same integrity assurance — and the malware check has no published hash to look up until the local scan runs.
 
 ## Lockfiles for teams
 
@@ -130,7 +135,7 @@ Useful flags: `-g, --goal` tells the reviewer what the change should achieve, `-
 
 ## Use with coding agents
 
-`oqgit mcp` starts a Model Context Protocol (MCP) server on standard input and output. It offers tools for resolving releases, trust reports, release diffs, file verification, and lock checks. Downloads are disabled unless you start it with `--allow-download`.
+`oqgit mcp` starts a Model Context Protocol (MCP) server on standard input and output. It offers tools for resolving releases, trust reports, malware checks, release diffs, file verification, and lock checks. Downloads are disabled unless you start it with `--allow-download`.
 
 For example, after installing the CLI, Claude Code can register it with:
 
@@ -142,7 +147,7 @@ Consult your MCP client's documentation for its registration format. The MCP ser
 
 ## Configuration, files, and limitations
 
-Set `GITHUB_TOKEN` or `GH_TOKEN` to increase the GitHub API request quota. Public repositories work without a token. `oqgit review` needs `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). `OQGIT_HOME` can override the local tracking-data directory; `oqgit doctor` shows the paths in use. Never commit tokens or private local state.
+Set `GITHUB_TOKEN` or `GH_TOKEN` to increase the GitHub API request quota. Public repositories work without a token. `oqgit review` needs `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). Set `VIRUSTOTAL_API_KEY` (free tier: about 4 lookups/minute and 500/day) for hash reputation checks. `OQGIT_CLAMSCAN` points at a specific ClamAV binary when it isn't on `PATH`. `OQGIT_HOME` can override the local tracking-data directory; `oqgit doctor` shows the paths in use. Never commit tokens or private local state.
 
 Only public repositories on `github.com` are supported. Filename matching can fail for unconventional releases. Linux package preference depends in part on `/etc/os-release`, while macOS and Windows compatibility checks depend on platform information available from Node and the operating system.
 

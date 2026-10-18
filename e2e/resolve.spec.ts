@@ -52,6 +52,31 @@ test("resolves a specific release tag instead of the latest", async ({ page }) =
   await expect(page.getByTestId("asset-name").locator(".sr-only")).toHaveText("Acme-1.3.0.dmg");
 });
 
+test("shows malware detections and lets the user inspect the evidence", async ({ page }) => {
+  await page.route("**/api/malware", (route) => route.fulfill({ json: {
+    ok: true, malware: { status: "flagged", sha256: "a".repeat(64), checks: [
+      { id: "reputation", label: "VirusTotal", status: "warn", detail: "2 engines flag this file as malicious." },
+    ] },
+  } }));
+  await resolve(page, "https://github.com/acme/desktop", "macos", "arm64");
+  const panel = page.getByTestId("malware-panel");
+  await expect(page.getByTestId("malware-status")).toHaveText("Flagged");
+  await panel.getByRole("button").click();
+  await expect(panel.getByRole("list")).toContainText("2 engines flag this file as malicious.");
+  await expect(panel).toContainText("known malware only");
+});
+
+test("keeps incomplete malware evidence unknown", async ({ page }) => {
+  await page.route("**/api/malware", (route) => route.fulfill({ json: {
+    ok: true, malware: { status: "unknown", checks: [
+      { id: "reputation", label: "VirusTotal", status: "info", detail: "No completed engine results." },
+    ] },
+  } }));
+  await resolve(page, "https://github.com/acme/desktop", "macos", "arm64");
+  await expect(page.getByTestId("malware-status")).toHaveText("Unknown");
+  await expect(page.getByTestId("malware-panel")).toContainText("No completed engine results are available");
+});
+
 test("shows Not recommended when the release only has source code", async ({ page }) => {
   await resolve(page, "https://github.com/acme/lib", "windows", "x64");
   await expect(page.getByTestId("status-badge")).toHaveText("Not recommended — don’t install");

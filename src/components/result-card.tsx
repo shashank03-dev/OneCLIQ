@@ -6,6 +6,7 @@ import { ArrowDownToLine, ExternalLink, FileArchive, Tag } from "lucide-react";
 import type { ResolveSuccess } from "@/core/types";
 import { KIND_LABELS, OS_LABELS, archLabel, formatBytes, noMatchMessage } from "@/core/labels";
 import { StatusBadge } from "./status-badge";
+import { MalwarePanel } from "./malware-panel";
 import { TrustPanel } from "./trust-panel";
 import { DecryptedText } from "./ui/decrypted-text";
 import { cn } from "@/lib/cn";
@@ -34,6 +35,7 @@ export function ResultCard({ result }: { result: ResolveSuccess }) {
     : null;
 
   const recommended = rec.status === "recommended";
+  const releaseUrl = `${result.repo.url}/releases/tag/${encodeURIComponent(result.release.tag)}`;
 
   return (
     <motion.div
@@ -96,10 +98,8 @@ export function ResultCard({ result }: { result: ResolveSuccess }) {
                 </div>
               </div>
 
-              <TrustPanel
-                releaseUrl={`${result.repo.url}/releases/tag/${encodeURIComponent(result.release.tag)}`}
-                platform={result.platform}
-              />
+              <TrustPanel releaseUrl={releaseUrl} platform={result.platform} />
+              <MalwarePanel releaseUrl={releaseUrl} platform={result.platform} />
 
               <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
                 <a
@@ -130,8 +130,8 @@ export function ResultCard({ result }: { result: ResolveSuccess }) {
                 {downloading ? "Your download is starting from GitHub. Check your browser’s downloads." : ""}
               </p>
               <p id="download-note" className="mt-2 text-[13px] leading-relaxed text-ink-subtle">
-                “Recommended” means this file appears to match your system — not that it has been checked for
-                safety. Only install software from publishers you trust.
+                “Recommended” means this file appears to match your system — not that it is safe. The malware
+                check covers known threats only. Only install software from publishers you trust.
               </p>
             </>
           ) : (
