@@ -29,6 +29,9 @@ const EXIT = { ok: 0, error: 1, usage: 2, noMatch: 3, policy: 4 } as const;
 
 class UsageError extends Error {}
 
+/** Raised when the user cancels an interactive prompt; unwinds to `main` for a clean exit. */
+class CancelledError extends Error {}
+
 // ---------------------------------------------------------------------------
 // Arguments
 // ---------------------------------------------------------------------------
@@ -217,7 +220,7 @@ function checkIcon(status: "pass" | "warn" | "info"): string {
 function exitOnCancel<T>(value: T): Exclude<T, symbol> {
   if (p.isCancel(value)) {
     p.cancel("Cancelled.");
-    process.exit(EXIT.ok);
+    throw new CancelledError();
   }
   return value as Exclude<T, symbol>;
 }
@@ -710,6 +713,7 @@ async function cmdUpdate(target: string | undefined, flags: Flags): Promise<numb
       const res = await cmdGet(r.repo, { ...flags, os: r.os, arch: r.arch, tag: undefined, open: false }, { quietHeader: true });
       if (res !== EXIT.ok) code = res;
     } catch (err) {
+      if (err instanceof CancelledError) throw err;
       code = EXIT.error;
       report(err);
     }
@@ -1247,6 +1251,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         throw new UsageError(`Unknown command “${first}”. Run oqgit --help.`);
     }
   } catch (err) {
+    if (err instanceof CancelledError) return EXIT.ok;
     report(err);
     return err instanceof UsageError || (err instanceof ResolveError && err.code === "INVALID_URL") ? EXIT.usage : EXIT.error;
   }
