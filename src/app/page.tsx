@@ -6,6 +6,9 @@ import { Pipeline } from "@/components/sections/pipeline";
 import { SiteFooter } from "@/components/sections/site-footer";
 import { SiteNav } from "@/components/sections/site-nav";
 import { Verify } from "@/components/sections/verify";
+import { ReviewShowcase } from "@/components/sections/review-showcase";
+import { Skills } from "@/components/sections/skills";
+import { ScrollProgress } from "@/components/ui/scroll-progress";
 
 export default function Home() {
   return (
@@ -16,13 +19,14 @@ export default function Home() {
       >
         Skip to content
       </a>
-      <div className="absolute inset-x-0 top-0 z-20">
-        <SiteNav />
-      </div>
+      <ScrollProgress />
+      <SiteNav />
       <main id="main" className="flex-1">
         <Hero />
         <Pipeline />
         <HowItWorks />
+        <ReviewShowcase />
+        <Skills />
         <Verify />
         <Cli />
         <Closing />

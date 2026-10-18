@@ -7,6 +7,8 @@ const LINKS = [
   { label: "CLI", href: "/#cli" },
   { label: "Try it", href: "/#find" },
   { label: "Review a PR", href: "/review" },
+  { label: "Skill library", href: "/skills" },
+  { label: "GitHub", href: "https://github.com/shashank03-dev/OneCLIQ" },
 ];
 
 /** “Organized.” row + giant wordmark over a painted meadow (after micro's footer). */

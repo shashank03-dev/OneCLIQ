@@ -1,7 +1,7 @@
 {
   "name": "onecliq",
-  "version": "0.1.1",
-  "description": "Find and download the right file from any GitHub release for this machine, and review pull requests with Gemma 4.",
+  "version": "0.2.0",
+  "description": "Find and download the right file from any GitHub release, review pull requests with Gemma 4, and add Agent Skills to your coding agent.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -32,7 +32,10 @@
     "code-review",
     "pull-request",
     "gemma",
-    "mcp"
+    "mcp",
+    "agent-skills",
+    "claude-code",
+    "skills"
   ],
   "scripts": {
     "prepublishOnly": "test -f dist/oqgit.mjs || (echo 'Run npm run cli:build from the repo root first' && exit 1)"

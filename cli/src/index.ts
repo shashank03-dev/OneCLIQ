@@ -21,6 +21,8 @@ import { TRUST_LEVEL_LABELS, humanDuration, type TrustReport } from "../../src/c
 import { parseGitHubUrl } from "../../src/core/parse-url";
 import { lockPath, readLock, readLockOrEmpty, sha256File, syncOne, writeLock } from "./lock";
 import { startMcpServer } from "./mcp";
+import { installSkills, parseAgents } from "./skills";
+import { AGENTS, DOMAINS, SKILLS, domainLabel, findSkill, searchSkills, skillMeta, skillSummary, type Skill } from "../../src/core/skills";
 import { copyToClipboard, makeExecutable, openFile, revealFile } from "./open";
 import { GitError, localContext, originRepo } from "./git";
 import { GemmaReviewer, GitHubPrClient, ModelQuotaError, SEVERITY_LABELS, parseApiKeys, parseReviewTarget, reviewChange, type ReviewResult, type Severity } from "../../src/core/review";
@@ -72,6 +74,9 @@ const OPTIONS = {
   fast: { type: "boolean" },
   "no-malware": { type: "boolean" },
   local: { type: "boolean" },
+  agent: { type: "string" },
+  global: { type: "boolean" },
+  domain: { type: "string" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "v" },
 } as const;
@@ -106,6 +111,9 @@ type Flags = {
   fast?: boolean;
   "no-malware"?: boolean;
   local?: boolean;
+  agent?: string;
+  global?: boolean;
+  domain?: string;
   help?: boolean;
   version?: boolean;
 };
@@ -121,11 +129,12 @@ const ALIASES: Record<string, string> = {
   remove: "forget",
   scan: "malware",
   rm: "forget",
+  skill: "skills",
 };
 
 const COMMANDS = [
   "get", "info", "list", "outdated", "update", "forget", "doctor", "help",
-  "trust", "malware", "diff", "verify", "lock", "sync", "mcp", "review",
+  "trust", "malware", "diff", "verify", "lock", "sync", "mcp", "review", "skills",
 ] as const;
 
 interface CommandHelp {
@@ -249,6 +258,27 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     flags: [["--extract", "unpack archives into .oqgit/tools/"], ["--lock <file>", "lockfile path"], ["--json", "machine-readable output"]],
     examples: ["oqgit sync", "oqgit sync --extract"],
   },
+  skills: {
+    usage: "oqgit skills [search] [words…] | skills show <name> | skills add <name|domain…>",
+    about: `Browse the OneCLIQ skill library: ${SKILLS.length} Agent Skills for developers in ${DOMAINS.length} domains.\n\`add\` installs them where your coding agent looks (default: the agents this project uses, else Claude Code).\nAgents: ${Object.keys(AGENTS).join(", ")}, all.`,
+    flags: [
+      ["--domain <id>", `only this domain: ${DOMAINS.map((d) => d.id).join(", ")}`],
+      ["--agent <list>", "add: claude, codex, cursor, gemini, copilot, opencode or all (comma-separated)"],
+      ["--global", "add: install for your user instead of this project"],
+      ["-o, --out <dir>", "add: install into this skills folder instead"],
+      ["-f, --force", "add: overwrite skills that are already installed"],
+      ["-n, --dry-run", "add: show where files would go"],
+      ["--json", "machine-readable output"],
+    ],
+    examples: [
+      "oqgit skills",
+      "oqgit skills search react performance",
+      "oqgit skills show secure-code-review",
+      "oqgit skills add pull-request-review",
+      "oqgit skills add security --agent claude,cursor",
+      "oqgit skills add gemma-4-prompting --global",
+    ],
+  },
   mcp: {
     usage: "oqgit mcp",
     about: "Run as an MCP server so coding agents can use oqgit.",
@@ -292,6 +322,7 @@ function help(): string {
     cmd("update", "", "get newer versions of what you've downloaded"),
     cmd("trust", "<repo>", "how much can you trust this release?"),
     cmd("review", "[pr]", "AI code review of a pull request or this branch"),
+    cmd("skills", "[words]", "search the skill library and add skills to your coding agent"),
     "",
     c.bold("More"),
     `  ${c.accent("malware  outdated  verify  diff  forget  lock  sync  mcp  doctor")}`,
@@ -346,6 +377,11 @@ function fullHelp(): string {
     cmd("sync", "", "download this machine's locked files, verified against the lock"),
     cmd("mcp", "", "run as an MCP server so coding agents can use oqgit"),
     "",
+    c.bold("Skill library"),
+    cmd("skills", "[search] [words…]", `browse ${SKILLS.length} Agent Skills in ${DOMAINS.length} domains`),
+    cmd("skills", "show <name>", "print a skill's SKILL.md"),
+    cmd("skills", "add <name|domain…>", "install into .claude/skills, .cursor/skills, … (--agent, --global)"),
+    "",
     c.bold("Flags"),
     flag("--os <windows|macos|linux>", "target another OS (or just write it after the repo)"),
     flag("--arch <x64|arm64|x86>", "target another CPU (or just write it after the repo)"),
@@ -384,6 +420,7 @@ function fullHelp(): string {
     `  ${c.dim("$")} oqgit get sharkdp/bat --min-age 3d`,
     `  ${c.dim("$")} oqgit lock cli/cli sharkdp/bat && oqgit sync`,
     `  ${c.dim("$")} claude mcp add oqgit -- oqgit mcp`,
+    `  ${c.dim("$")} oqgit skills add pull-request-review --agent claude,cursor`,
     `  ${c.dim("$")} oqgit review https://github.com/owner/repo/pull/12`,
     `  ${c.dim("$")} oqgit review --goal "add retry to uploads" --copy`,
     "",
@@ -1779,6 +1816,93 @@ function plainReview(r: ReviewResult): string {
 // Interactive menu (no arguments)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Skill library
+// ---------------------------------------------------------------------------
+
+function skillRows(list: Skill[]): string[][] {
+  return [["SKILL", "DOMAIN", "WHAT IT'S FOR"], ...list.map((s) => [c.accent(s.name), c.dim(s.domain), skillSummary(s)])];
+}
+
+async function cmdSkills(sub: string | undefined, args: string[], flags: Flags): Promise<number> {
+  const domain = flags.domain;
+  if (domain && !DOMAINS.some((d) => d.id === domain)) throw new UsageError(`Unknown domain “${domain}”. Use one of: ${DOMAINS.map((d) => d.id).join(", ")}.`);
+
+  if (sub === "show") {
+    if (!args[0]) throw new UsageError("Which skill? e.g. oqgit skills show secure-code-review");
+    const skill = findSkill(args[0]);
+    if (!skill) throw new UsageError(`No skill called “${args[0]}”. Try oqgit skills search ${args[0]}.`);
+    if (flags.json) console.log(JSON.stringify(skill, null, 2));
+    else console.log(skill.content);
+    return EXIT.ok;
+  }
+
+  if (sub === "add" || sub === "install") {
+    if (!args.length) throw new UsageError("Name one or more skills or domains, e.g. oqgit skills add pull-request-review");
+    const picked = new Map<string, Skill>();
+    for (const name of args) {
+      const inDomain = SKILLS.filter((s) => s.domain === name);
+      const one = findSkill(name);
+      if (inDomain.length) inDomain.forEach((s) => picked.set(s.name, s));
+      else if (one) picked.set(one.name, one);
+      else throw new UsageError(`No skill or domain called “${name}”.${searchSkills(name, { limit: 1 })[0] ? ` Did you mean ${searchSkills(name, { limit: 1 })[0].name}?` : ""}`);
+    }
+    let agents;
+    try {
+      agents = parseAgents(flags.agent, process.cwd());
+    } catch (err) {
+      throw new UsageError((err as Error).message);
+    }
+    const results = await installSkills([...picked.values()], {
+      agents,
+      global: flags.global,
+      dir: flags.out,
+      force: flags.force,
+      dryRun: flags["dry-run"],
+      cwd: process.cwd(),
+    });
+    if (flags.json) {
+      console.log(JSON.stringify(results, null, 2));
+      return EXIT.ok;
+    }
+    header("skills");
+    const icon = { installed: c.ok("✓"), updated: c.ok("↻"), exists: c.dim("•"), "would-install": c.info("→") } as const;
+    for (const r of results) {
+      const where = c.dim(tildify(path.dirname(r.file)));
+      const note = r.status === "exists" ? c.dim(" already there (use --force to overwrite)") : r.status === "would-install" ? c.dim(" (dry run)") : "";
+      console.log(`  ${icon[r.status]} ${c.bold(r.skill)} ${c.dim("→")} ${r.agent === "custom" ? "" : `${AGENTS[r.agent].label} `}${where}${note}`);
+    }
+    const done = results.filter((r) => r.status === "installed" || r.status === "updated").length;
+    p.outro(done ? c.dim(`${done} installed. Your agent picks skills up on its next session; just describe the task.`) : c.dim("Nothing new installed."));
+    return EXIT.ok;
+  }
+
+  // List / search: `oqgit skills`, `oqgit skills search react`, or `oqgit skills react`.
+  const words = sub === "search" || sub === "list" || sub === "ls" ? args : [sub, ...args].filter((w): w is string => !!w);
+  const found = searchSkills(words.join(" "), { domain });
+  if (flags.json) {
+    console.log(JSON.stringify(found.map(skillMeta), null, 2));
+    return EXIT.ok;
+  }
+  header("skills");
+  if (!found.length) {
+    p.outro(c.dim(`No skills match “${words.join(" ")}”. Try ${c.info("oqgit skills")} to see them all.`));
+    return EXIT.ok;
+  }
+  if (words.length || domain) console.log(table(skillRows(found)));
+  else {
+    for (const d of DOMAINS) {
+      const inDomain = found.filter((s) => s.domain === d.id);
+      if (!inDomain.length) continue;
+      console.log(`  ${c.bold(domainLabel(d.id))} ${c.dim(`· ${d.blurb}`)}`);
+      for (const s of inDomain) console.log(`    ${c.accent(s.name.padEnd(26))}${c.dim(skillSummary(s))}`);
+      console.log("");
+    }
+  }
+  p.outro(c.dim(`Add one: ${c.info(`oqgit skills add ${found[0].name}`)} · read one: ${c.info(`oqgit skills show ${found[0].name}`)}`));
+  return EXIT.ok;
+}
+
 async function menu(flags: Flags): Promise<number> {
   console.log(banner(VERSION));
   const choice = exitOnCancel(
@@ -1791,6 +1915,7 @@ async function menu(flags: Flags): Promise<number> {
         { value: "outdated", label: "Check for updates" },
         { value: "trust", label: "Trust report", hint: "attestations, immutability, re-uploads" },
         { value: "review", label: "Review code", hint: "a PR, a branch, or this repo's changes" },
+        { value: "skills", label: "Skill library", hint: `${SKILLS.length} agent skills to add to your coding agent` },
         { value: "malware", label: "Malware check", hint: "VirusTotal hash lookup, optional local scan" },
         { value: "doctor", label: "Doctor", hint: "system, token, API quota" },
         { value: "help", label: "Help" },
@@ -1816,6 +1941,7 @@ async function menu(flags: Flags): Promise<number> {
     const t = exitOnCancel(await p.text({ message: "GitHub repository or release URL", placeholder: "owner/repo" }));
     return cmdMalware(t, flags);
   }
+  if (choice === "skills") return cmdSkills(undefined, [], flags);
   if (choice === "list") return cmdList(flags);
   if (choice === "outdated") return cmdOutdated(flags);
   if (choice === "doctor") return cmdDoctor(flags);
@@ -1922,6 +2048,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         return await cmdSync(flags);
       case "review":
         return await cmdReview(second, flags);
+      case "skills":
+        return await cmdSkills(second, rest, flags);
       case "mcp":
         await startMcpServer({
           client,

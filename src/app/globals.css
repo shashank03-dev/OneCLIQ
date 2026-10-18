@@ -126,3 +126,61 @@ select {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* Pointer-following light for <Spotlight> surfaces. --x/--y are set from JS on pointermove. */
+.spotlight {
+  position: relative;
+  isolation: isolate;
+}
+.spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease-out;
+  background: radial-gradient(260px circle at var(--x, 50%) var(--y, 50%), color-mix(in oklab, var(--ember) 14%, transparent), transparent 70%);
+}
+.spotlight[data-tone="night"]::before {
+  background: radial-gradient(280px circle at var(--x, 50%) var(--y, 50%), color-mix(in oklab, var(--lilac) 22%, transparent), transparent 70%);
+}
+@media (hover: hover) and (pointer: fine) {
+  .spotlight:hover::before { opacity: 1; }
+}
+
+/* Gradient hairline border that brightens on hover (night cards). */
+.ring-glow {
+  position: relative;
+}
+.ring-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(140deg, color-mix(in oklab, var(--ember) 70%, transparent), transparent 40%, transparent 60%, color-mix(in oklab, var(--lilac) 70%, transparent));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 220ms ease-out;
+}
+.ring-glow:hover::after,
+.ring-glow:focus-within::after {
+  opacity: 1;
+}
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
+}
+.text-shimmer {
+  background: linear-gradient(90deg, currentColor 0%, currentColor 40%, var(--ember) 50%, currentColor 60%, currentColor 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 6s linear infinite;
+}

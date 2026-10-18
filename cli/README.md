@@ -54,6 +54,20 @@ npm run cli:dev -- get sharkdp/bat --dry-run
 
 The published package is `onecliq` on npm (`npm install -g onecliq`); maintainers release it with `npm run cli:publish` from the repository root.
 
+## Add skills to your coding agent
+
+`oqgit` ships a library of 21 [Agent Skills](https://agentskills.io) for developers in 7 domains (frontend, backend, DevOps, security, testing, AI engineering, git workflow).
+
+```bash
+oqgit skills                                   # browse by domain
+oqgit skills search react performance          # search
+oqgit skills add pull-request-review           # install into .claude/skills
+oqgit skills add security --agent cursor,codex # a whole domain, other agents
+oqgit skills add llm-evals --global            # for your user, not just this project
+```
+
+Agents: `claude`, `codex`, `cursor`, `gemini`, `copilot`, `opencode`, or `all`. Existing skills are never overwritten without `--force`. Over MCP (`oqgit mcp`), agents get `search_skills`, `get_skill` and `install_skill`.
+
 ## Download your first file
 
 ```bash

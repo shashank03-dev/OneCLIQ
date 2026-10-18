@@ -91,6 +91,11 @@ Scale: display `clamp(44px, 7vw, 92px)` · h2 `clamp(36px, 5vw, 64px)` · h3 20p
 | `PillButton` | in-house (`ui/pill-button.tsx`) | Ink pill with an ember icon chip (PlayerZero-style) |
 | `MicroLabel` | in-house (`ui/micro-label.tsx`) | Uppercase mono captions and corner labels |
 | `Landscape` | in-house (`ui/landscape.tsx`) | Painted scene: renders the AI artwork if present, otherwise a layered SVG fallback |
+| `Reveal` | in-house (`ui/reveal.tsx`) | 14px rise + blur-fade the first time a block scrolls into view |
+| `Spotlight` | in-house (`ui/spotlight.tsx`) | Pointer-following glow on cards (`.spotlight` in globals.css; desktop pointers only) |
+| `CopyButton` | in-house (`ui/copy-button.tsx`) | Copy with an icon that springs to a check, announced via `aria-live` |
+| `ScrollProgress` | in-house (`ui/scroll-progress.tsx`) | Ember→dusk hairline at the top of the landing page |
+| `SkillBrowser` | in-house (`skills/skill-browser.tsx`) | Search (`/` to focus), domain and agent pills with a sliding indicator, SKILL.md drawer |
 
 DesignPass components are by Ernest Liu (ernestliu.com), MIT licensed; keep the header comment in each file
 under `src/components/designpass/`.
@@ -110,6 +115,9 @@ Night cards: `bg-night-raised border border-night-rule`.
 
 - Entrances: `BlurText` for headlines (stagger 60–80ms), simple 12px rise + fade for blocks.
 - Ambient: floating tiles bob 6px over 6–8s; nothing loops faster than 4s.
+- Pointer: hero tiles drift against the cursor (parallax by depth) and show a label on hover; cards carry a `Spotlight` glow.
+- Selection: pills that pick one option (nav, domain, agent, severity, tabs) share a `layoutId` so the highlight slides between them.
+- Feedback: every copy button flips to a check; the nav condenses into a glass pill after 24px of scroll.
 - Everything respects `prefers-reduced-motion` (DesignPass components handle it internally; `globals.css` caps the rest).
 
 ## Imagery
