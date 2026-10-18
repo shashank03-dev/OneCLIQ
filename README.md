@@ -121,7 +121,16 @@ Failures return an `ok: false` object with an `error.code` and `error.message`. 
 
 ## CLI setup and commands
 
-Build the CLI locally:
+Install from npm (Node.js 20+). The package is `onecliq`, and the command is `oqgit`:
+
+```bash
+npm install -g onecliq
+oqgit sharkdp/bat --dry-run
+```
+
+Or try it without installing: `npx onecliq sharkdp/bat --dry-run`.
+
+To build the CLI from source instead:
 
 ```bash
 npm run cli:build

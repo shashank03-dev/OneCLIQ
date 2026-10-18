@@ -1,5 +1,5 @@
 {
-  "name": "oqgit",
+  "name": "onecliq",
   "version": "0.1.0",
   "description": "Find and download the right file from any GitHub release for this machine, and review pull requests with Gemma 4.",
   "license": "MIT",

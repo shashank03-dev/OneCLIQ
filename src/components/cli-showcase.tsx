@@ -26,7 +26,7 @@ const SCRIPT: Line[] = [
   { text: "  └ Saved to ~/Downloads/bat-v0.25.0-aarch64-apple-darwin.tar.gz", className: "text-night-muted" },
 ];
 
-const INSTALL = "npm i -g oqgit";
+const INSTALL = "npm i -g onecliq";
 
 export function CliShowcase() {
   const ref = useRef<HTMLDivElement>(null);

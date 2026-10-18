@@ -4,6 +4,17 @@
 
 **A match is not a safety guarantee.** `oqgit` uses filenames and GitHub metadata to choose a file, and it checks downloads for **known** malware — a VirusTotal hash lookup and, when VirusTotal can't answer and ClamAV is installed, a local scan. No check proves software harmless, and `oqgit` never installs anything. Opening a downloaded file is a separate, explicit action.
 
+## Install
+
+You need Node.js 20 or newer.
+
+```bash
+npm install -g onecliq
+oqgit --help
+```
+
+Or run it once without installing: `npx onecliq sharkdp/bat`. The npm package is called `onecliq`; the command it installs is `oqgit`.
+
 ## Install from source
 
 You need Node.js 20 or newer and npm. To build the CLI from a checkout of this repository:
@@ -29,7 +40,7 @@ For development, run the TypeScript source without a separate build:
 npm run cli:dev -- get sharkdp/bat --dry-run
 ```
 
-The npm package is named `oqgit` in `cli/package.json`. Check whether it is published before relying on `npm install -g oqgit`. The source installation above works without an npm registry release.
+The published package is `onecliq` on npm (`npm install -g onecliq`); maintainers release it with `npm run cli:publish` from the repository root.
 
 ## Download your first file
 
