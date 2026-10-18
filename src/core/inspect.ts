@@ -3,9 +3,11 @@
  * Each function makes a small, fixed number of GitHub calls built from validated owner/repo values.
  */
 import type { AttestationSummary, GitHubClient } from "./github";
+import { assessMalware, type LocalScanResult, type MalwareReport } from "./malware";
 import { findByDigest, previousStable } from "./releases";
 import { assessTrust, type TrustReport } from "./trust";
 import type { Release, ReleaseAsset } from "./types";
+import type { VirusTotalClient } from "./virustotal";
 
 type Repo = { owner: string; repo: string };
 
@@ -67,4 +69,19 @@ export async function verifyDigest(client: GitHubClient, target: Repo, sha256: s
     scanned: releases.length,
     attestations,
   };
+}
+
+/**
+ * Known-malware evidence for one file: VirusTotal hash reputation plus, when the caller
+ * scanned the downloaded bytes, a local antivirus result. Never downloads anything itself.
+ */
+export async function malwareFor(
+  vt: VirusTotalClient,
+  digest: string | undefined,
+  local?: LocalScanResult,
+): Promise<MalwareReport> {
+  const hex = digest?.replace(/^sha256:/i, "").toLowerCase();
+  const sha256 = hex && /^[a-f0-9]{64}$/.test(hex) ? hex : undefined;
+  const reputation = sha256 ? await vt.lookupHash(sha256) : null;
+  return assessMalware({ sha256, reputation, local, reputationUnconfigured: !vt.enabled });
 }

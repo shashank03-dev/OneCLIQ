@@ -154,4 +154,70 @@ describe("oqgit main()", () => {
     expect((await run(["--help"])).out).toMatch(/oqgit/);
     expect((await run(["--version"])).out).toMatch(/\d+\.\d+\.\d+/);
   });
+
+  const HEX_A = "a".repeat(64);
+  const HEX_B = "b".repeat(64);
+  function digestFetchStub(repo: string, hex: string) {
+    return vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url.endsWith(`/repos/${repo}/releases/latest`)) {
+        return Response.json({
+          tag_name: "v1.0.0",
+          name: "Tool 1.0",
+          html_url: `https://github.com/${repo}/releases/tag/v1.0.0`,
+          draft: false,
+          prerelease: false,
+          published_at: "2026-01-01T00:00:00Z",
+          assets: [
+            {
+              name: "tool-linux-x64.tar.gz",
+              size: 10,
+              state: "uploaded",
+              digest: `sha256:${hex}`,
+              browser_download_url: `https://github.com/${repo}/releases/download/v1.0.0/tool-linux-x64.tar.gz`,
+            },
+          ],
+        });
+      }
+      if (url === `https://www.virustotal.com/api/v3/files/${hex}`) {
+        return Response.json({
+          data: {
+            attributes: {
+              last_analysis_stats: { malicious: 3, suspicious: 0, harmless: 50, undetected: 7 },
+              last_analysis_results: { E1: { category: "malicious", result: "Trojan.Agent", engine_name: "EngineOne" } },
+            },
+          },
+        });
+      }
+      return new Response("{}", { status: 404 });
+    });
+  }
+
+  it("checks a release's file against VirusTotal", async () => {
+    vi.stubEnv("VIRUSTOTAL_API_KEY", "test-key");
+    vi.stubGlobal("fetch", digestFetchStub("acme/malware-a", HEX_A));
+    const { code, out } = await run(["malware", "acme/malware-a", "--os", "linux", "--arch", "x64", "--json"]);
+    expect(code).toBe(4);
+    const parsed = JSON.parse(out);
+    expect(parsed.file).toBe("tool-linux-x64.tar.gz");
+    expect(parsed.malware.status).toBe("flagged");
+    expect(parsed.malware.sha256).toBe(HEX_A);
+    expect(parsed.malware.checks.find((ch: { id: string }) => ch.id === "reputation").detail).toMatch(/3 of 60/);
+  });
+
+  it("explains a missing VirusTotal key", async () => {
+    vi.stubGlobal("fetch", digestFetchStub("acme/malware-b", HEX_B));
+    const { code, out } = await run(["malware", "acme/malware-b", "--os", "linux", "--arch", "x64", "--json"]);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(out);
+    expect(parsed.malware.status).toBe("unavailable");
+    expect(JSON.stringify(parsed)).toMatch(/No VirusTotal API key/);
+  });
+
+  it("requires ClamAV for --local", async () => {
+    vi.stubEnv("OQGIT_CLAMSCAN", path.join(dir, "no-such-clamscan"));
+    const { code, err } = await run(["malware", "acme/tool", "--os", "linux", "--arch", "x64", "--local"]);
+    expect(code).toBe(2);
+    expect(err).toMatch(/ClamAV/);
+  });
 });

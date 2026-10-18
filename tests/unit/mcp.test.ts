@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { GitHubClient } from "@/core/github";
 import { TtlCache } from "@/core/cache";
+import { VirusTotalClient } from "@/core/virustotal";
 import { buildTools, handleMessage } from "../../cli/src/mcp";
+
+const HEX = "a".repeat(64);
 
 const release = {
   tag_name: "v1.0.0",
@@ -14,18 +17,35 @@ const release = {
     name,
     size: 4096,
     state: "uploaded",
+    digest: name.includes("linux") ? `sha256:${HEX}` : null,
     browser_download_url: `https://github.com/acme/agent/releases/download/v1.0.0/${name}`,
   })),
 };
 
 function tools(allowDownload = false) {
   const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
-    const path = String(input).replace("https://api.github.com", "");
+    const path = String(input)
+      .replace("https://api.github.com", "")
+      .replace("https://www.virustotal.com/api/v3", "");
     if (path === "/repos/acme/agent/releases/latest") return new Response(JSON.stringify(release), { status: 200 });
+    if (path === `/files/${HEX}`) {
+      return new Response(
+        JSON.stringify({
+          data: {
+            attributes: {
+              last_analysis_stats: { malicious: 2, suspicious: 1, harmless: 40, undetected: 7 },
+              last_analysis_results: { E1: { category: "malicious", result: "Trojan.Agent", engine_name: "EngineOne" } },
+            },
+          },
+        }),
+        { status: 200 },
+      );
+    }
     return new Response("{}", { status: 404 });
   });
   const client = () => new GitHubClient({ fetch: fetchImpl as unknown as typeof fetch, cache: new TtlCache() });
-  return buildTools({ client, system: { os: "macos", arch: "arm64", detail: "test" }, version: "9.9.9", allowDownload, cwd: process.cwd() });
+  const vt = () => new VirusTotalClient({ apiKey: "test-key", fetch: fetchImpl as unknown as typeof fetch, cache: new TtlCache() });
+  return buildTools({ client, vt, system: { os: "macos", arch: "arm64", detail: "test" }, version: "9.9.9", allowDownload, cwd: process.cwd() });
 }
 
 const call = (id: number, method: string, params?: unknown) => ({ jsonrpc: "2.0", id, method, params });
@@ -66,5 +86,15 @@ describe("oqgit mcp", () => {
     };
     expect(res.result.isError).toBe(true);
     expect(res.result.content[0].text).toMatch(/target/);
+  });
+
+  it("checks a file's hash against VirusTotal", async () => {
+    const res = (await handleMessage(
+      call(7, "tools/call", { name: "check_malware", arguments: { target: "acme/agent", os: "linux", arch: "arm64" } }),
+      tools(),
+      "x",
+    )) as { result: { isError: boolean; structuredContent: { file: string; malware: { status: string; sha256: string } } } };
+    expect(res.result.isError).toBe(false);
+    expect(res.result.structuredContent.malware).toMatchObject({ status: "flagged", sha256: HEX });
   });
 });
