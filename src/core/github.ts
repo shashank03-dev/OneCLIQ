@@ -20,6 +20,11 @@ export interface GitHubClientOptions {
   userAgent?: string;
   cache?: TtlCache<Release>;
   cacheTtlMs?: number;
+  /**
+   * Refuse private repositories. Required whenever the token can read private repos but the caller is
+   * anonymous (the web app): otherwise a `repo`-scoped token would expose the owner's private releases.
+   */
+  publicOnly?: boolean;
 }
 
 // --- Response validation -----------------------------------------------------
@@ -132,6 +137,8 @@ export function isStable(release: Pick<Release, "draft" | "prerelease" | "tag">)
 const sharedCache = new TtlCache<Release>();
 const listCache = new TtlCache<Release[]>(200);
 const attestationCache = new TtlCache<AttestationSummary>(1000);
+/** owner/repo → is it public? Checked before any cached release data is served. */
+const visibilityCache = new TtlCache<boolean>(2000);
 
 export class GitHubClient {
   private readonly apiBase: string;
@@ -141,6 +148,7 @@ export class GitHubClient {
   private readonly userAgent: string;
   private readonly cache: TtlCache<Release>;
   private readonly cacheTtlMs: number;
+  private readonly publicOnly: boolean;
 
   constructor(opts: GitHubClientOptions = {}) {
     this.apiBase = (opts.apiBase || DEFAULT_API_BASE).replace(/\/+$/, "");
@@ -150,10 +158,27 @@ export class GitHubClient {
     this.userAgent = opts.userAgent ?? "onecliq-resolver";
     this.cache = opts.cache ?? sharedCache;
     this.cacheTtlMs = opts.cacheTtlMs ?? 5 * 60_000;
+    this.publicOnly = opts.publicOnly ?? false;
+  }
+
+  /** With `publicOnly`, private (or missing) repositories look exactly like missing ones. */
+  private async assertPublic(target: Pick<RepoTarget, "owner" | "repo">): Promise<void> {
+    if (!this.publicOnly) return;
+    const key = `${this.apiBase}|${target.owner}/${target.repo}`.toLowerCase();
+    const isPublic = await visibilityCache.wrap(key, this.cacheTtlMs, async () => {
+      const res = await this.request(this.repoPath(target));
+      if (res.status === 404) return false;
+      const repo = await this.parse(res, z.object({ private: z.boolean() }).passthrough());
+      return !repo.private;
+    });
+    if (!isPublic) {
+      throw new ResolveError("REPO_NOT_FOUND", `We couldn't find a public repository at github.com/${target.owner}/${target.repo}.`);
+    }
   }
 
   /** The release a target points at: its tag, or the latest stable release. */
   async getRelease(target: RepoTarget): Promise<Release> {
+    await this.assertPublic(target);
     const key = `${target.owner}/${target.repo}@${target.tag ?? ""}`.toLowerCase();
     return this.cache.wrap(key, this.cacheTtlMs, () =>
       target.tag ? this.getTaggedRelease(target) : this.getLatestStableRelease(target),
@@ -162,6 +187,7 @@ export class GitHubClient {
 
   /** Published (non-draft) releases, newest first. Pre-releases included; filter with `isStable`. */
   async listReleases(target: Pick<RepoTarget, "owner" | "repo">, perPage = 30): Promise<Release[]> {
+    await this.assertPublic(target);
     const key = `${target.owner}/${target.repo}#${perPage}`.toLowerCase();
     return listCache.wrap(key, this.cacheTtlMs, async () => {
       const res = await this.request(`${this.repoPath(target)}/releases?per_page=${Math.min(100, Math.max(1, perPage))}`);
@@ -183,6 +209,7 @@ export class GitHubClient {
    */
   async getAttestations(target: Pick<RepoTarget, "owner" | "repo">, digest: string): Promise<AttestationSummary | null> {
     if (!/^sha256:[a-f0-9]{64}$/i.test(digest)) return null;
+    await this.assertPublic(target);
     const key = `${target.owner}/${target.repo}@${digest}`.toLowerCase();
     const cached = attestationCache.get(key);
     if (cached) return cached;

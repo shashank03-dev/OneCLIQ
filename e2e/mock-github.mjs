@@ -58,7 +58,9 @@ const ROUTES = {
   ],
   "/repos/acme/limited/releases/latest": [403, { message: "API rate limit exceeded" }, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 600) }],
   "/repos/acme/empty/releases?per_page=30": [200, []],
-  "/repos/acme/empty": [200, { id: 1 }],
+  "/repos/acme/empty": [200, { id: 1, private: false }],
+  // The web server refuses private repos, so it asks for each repo's visibility first.
+  ...Object.fromEntries(["desktop", "lib", "suite", "limited"].map((name) => [`/repos/acme/${name}`, [200, { id: 1, private: false }]])),
   "/rate_limit": [200, { resources: { core: { limit: 60, remaining: 59, reset: Math.floor(Date.now() / 1000) + 3600 } } }],
 };
 

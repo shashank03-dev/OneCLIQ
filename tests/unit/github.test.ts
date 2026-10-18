@@ -269,3 +269,33 @@ describe("resolve()", () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe("publicOnly", () => {
+  it("refuses a private repository before reading any release data", async () => {
+    const { gh, calls } = client(
+      { "/repos/acme/app": { status: 200, body: { private: true } }, "/repos/acme/app/releases/latest": { status: 200, body: release("v1.0.0") } },
+      { publicOnly: true },
+    );
+    expect(await codeOf(gh.getRelease(T))).toBe("REPO_NOT_FOUND");
+    expect(await codeOf(gh.listReleases(T))).toBe("REPO_NOT_FOUND");
+    expect(await codeOf(gh.getAttestations(T, `sha256:${"a".repeat(64)}`))).toBe("REPO_NOT_FOUND");
+    expect(calls.every((u) => u.endsWith("/repos/acme/app"))).toBe(true);
+  });
+
+  it("serves public repositories, checking visibility once", async () => {
+    const { gh, calls } = client(
+      { "/repos/acme/pub": { status: 200, body: { private: false } }, "/repos/acme/pub/releases/latest": { status: 200, body: release("v1.0.0") } },
+      { publicOnly: true },
+    );
+    const target = { owner: "acme", repo: "pub" };
+    expect((await gh.getRelease(target)).tag).toBe("v1.0.0");
+    await gh.getRelease({ ...target, tag: undefined });
+    expect(calls.filter((u) => u.endsWith("/repos/acme/pub"))).toHaveLength(1);
+  });
+
+  it("doesn't check visibility when off (the CLI, using the user's own token)", async () => {
+    const { gh, calls } = client({ "/repos/acme/app/releases/latest": { status: 200, body: release("v2.0.0") } });
+    expect((await gh.getRelease({ owner: "acme", repo: "app" })).tag).toBe("v2.0.0");
+    expect(calls.some((u) => u.endsWith("/repos/acme/app"))).toBe(false);
+  });
+});
