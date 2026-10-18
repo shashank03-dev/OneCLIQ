@@ -64,6 +64,8 @@ function str(args: Json, key: string, required = false): string | undefined {
 }
 
 export function buildTools(deps: Deps): Tool[] {
+  // One client per server: all tools share its outbound quota and in-flight lookups.
+  const vt = deps.vt();
   const platformOf = (args: Json): Platform => {
     const os = (str(args, "os") ?? deps.system.os) as Os | null;
     const arch = (str(args, "arch") ?? deps.system.arch) as Arch | null;
@@ -132,7 +134,7 @@ export function buildTools(deps: Deps): Tool[] {
         const rec = d.response.recommendation;
         if (rec.status !== "recommended") return { recommendation: rec, file: null, malware: null };
         const asset = d.release.assets.find((a) => a.name === rec.asset.name)!;
-        return { release: d.response.release, file: asset.name, malware: await malwareFor(deps.vt(), asset.digest) };
+        return { release: d.response.release, file: asset.name, malware: await malwareFor(vt, asset.digest) };
       },
     },
     {
@@ -213,7 +215,7 @@ export function buildTools(deps: Deps): Tool[] {
           ...res,
           tag: d.release.tag,
           trust: { level: trust.level, score: trust.score },
-          malware: await malwareFor(deps.vt(), asset.digest, undefined),
+          malware: await malwareFor(vt, res.sha256),
         };
       },
     });

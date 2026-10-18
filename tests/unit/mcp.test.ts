@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { GitHubClient } from "@/core/github";
 import { TtlCache } from "@/core/cache";
 import { VirusTotalClient } from "@/core/virustotal";
@@ -96,5 +100,49 @@ describe("oqgit mcp", () => {
     )) as { result: { isError: boolean; structuredContent: { file: string; malware: { status: string; sha256: string } } } };
     expect(res.result.isError).toBe(false);
     expect(res.result.structuredContent.malware).toMatchObject({ status: "flagged", sha256: HEX });
+  });
+
+  it("checks downloaded bytes even when GitHub published no digest", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "oqgit-mcp-test-"));
+    const body = Buffer.from("downloaded release");
+    const sha256 = createHash("sha256").update(body).digest("hex");
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/releases/latest")) return Response.json({ ...release, assets: [{ ...release.assets[1], size: body.length }] });
+      if (url === release.assets[1].browser_download_url) return new Response(body);
+      if (url.endsWith(`/files/${sha256}`)) return Response.json({ data: { attributes: {
+        last_analysis_stats: { malicious: 2, suspicious: 0, harmless: 40, undetected: 7 },
+      } } });
+      return new Response("{}", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    try {
+      const gh = new GitHubClient({ fetch: fetchImpl, cache: new TtlCache() });
+      const vt = new VirusTotalClient({ apiKey: "test-key", fetch: fetchImpl, cache: new TtlCache() });
+      const download = buildTools({ client: () => gh, vt: () => vt, system: { os: "macos", arch: "arm64", detail: "test" }, version: "x", allowDownload: true, cwd: dir })
+        .find((t) => t.name === "download_release")!;
+      const result = await download.run({ target: "acme/agent", allow_weak: true }) as { malware: { status: string; sha256: string }; path: string };
+      expect(result.malware).toMatchObject({ status: "flagged", sha256 });
+      expect(await readFile(result.path)).toEqual(body);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the reputation budget across MCP tool calls", async () => {
+    const fetchImpl: typeof fetch = async (input) => {
+      if (String(input).includes("api.github.com")) return Response.json({ ...release, assets: release.assets.map((a, i) => ({ ...a, digest: `sha256:${String(i + 1).repeat(64)}` })) });
+      return new Response("{}", { status: 404 });
+    };
+    const t = buildTools({
+      client: () => new GitHubClient({ fetch: fetchImpl, cache: new TtlCache() }),
+      vt: () => new VirusTotalClient({ apiKey: "test-key", fetch: fetchImpl, cache: new TtlCache(), maxPerMinute: 1 }),
+      system: { os: "linux", arch: "arm64", detail: "test" }, version: "x", allowDownload: false, cwd: process.cwd(),
+    }).find((t) => t.name === "check_malware")!;
+    const first = await t.run({ target: "acme/agent", os: "linux" }) as { malware: { status: string } };
+    const second = await t.run({ target: "acme/agent", os: "macos" }) as { malware: { status: string } };
+    expect(first.malware.status).toBe("unknown");
+    expect(second.malware.status).toBe("unavailable");
   });
 });

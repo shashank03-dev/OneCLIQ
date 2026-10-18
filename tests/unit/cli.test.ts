@@ -220,4 +220,39 @@ describe("oqgit main()", () => {
     expect(code).toBe(2);
     expect(err).toMatch(/ClamAV/);
   });
+
+  it.each([
+    { extra: [], code: 4, kept: false },
+    { extra: ["--force"], code: 0, kept: true },
+    { extra: ["--no-malware"], code: 0, kept: true },
+  ])("handles a flagged download with flags $extra", async ({ extra, code, kept }) => {
+    vi.resetModules();
+    vi.stubEnv("VIRUSTOTAL_API_KEY", "test-key");
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/repos/acme/flagged/releases/latest")) return Response.json({
+        tag_name: "v1.0.0", name: "Flagged", html_url: "https://github.com/acme/flagged/releases/tag/v1.0.0",
+        draft: false, prerelease: false, published_at: "2026-01-01T00:00:00Z",
+        assets: [{ name: "tool-linux-x64.tar.gz", size: BODY.length, digest: `sha256:${SHA}`, state: "uploaded",
+          browser_download_url: "https://github.com/acme/flagged/releases/download/v1.0.0/tool-linux-x64.tar.gz" }],
+      });
+      if (url.includes("/releases/download/")) return new Response(BODY);
+      if (url.endsWith(`/files/${SHA}`)) return Response.json({ data: { attributes: {
+        last_analysis_stats: { malicious: 1, suspicious: 0, harmless: 40, undetected: 7 },
+      } } });
+      return new Response("{}", { status: 404 });
+    });
+    const result = await run(["get", "acme/flagged", "--os", "linux", "--arch", "x64", "--yes", "--json", "--out", dir, ...extra]);
+    expect(result.code).toBe(code);
+    const parsed = JSON.parse(result.out);
+    expect(parsed.ok).toBe(kept);
+    if (extra.includes("--no-malware")) expect(parsed.malware).toBeNull();
+    else expect(parsed.malware.status).toBe("flagged");
+    const saved = path.join(dir, "tool-linux-x64.tar.gz");
+    if (kept) expect(await readFile(saved)).toEqual(BODY);
+    else {
+      await expect(readFile(saved)).rejects.toThrow();
+      await expect(readFile(path.join(dir, "state.json"))).rejects.toThrow();
+    }
+  });
 });

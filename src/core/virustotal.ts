@@ -112,6 +112,7 @@ export class VirusTotalClient {
   private readonly cache: TtlCache<VirusTotalFileReport>;
   private readonly cacheTtlMs: number;
   private readonly budget: LookupBudget;
+  private readonly pending = new Map<string, Promise<VirusTotalFileReport | null>>();
 
   constructor(opts: VirusTotalClientOptions = {}) {
     this.apiBase = (opts.apiBase || DEFAULT_VT_API_BASE).replace(/\/+$/, "");
@@ -140,12 +141,20 @@ export class VirusTotalClient {
 
     const cached = this.cache.get(hex);
     if (cached) return cached;
+    const pending = this.pending.get(hex);
+    if (pending) return pending;
     if (!this.apiKey || !this.budget.take()) return null;
 
+    const request = this.fetchReport(hex).finally(() => this.pending.delete(hex));
+    this.pending.set(hex, request);
+    return request;
+  }
+
+  private async fetchReport(hex: string): Promise<VirusTotalFileReport | null> {
     let report: VirusTotalFileReport | null = null;
     try {
       const res = await this.fetchImpl(`${this.apiBase}/files/${hex}`, {
-        headers: { Accept: "application/json", "x-apikey": this.apiKey, "User-Agent": this.userAgent },
+        headers: { Accept: "application/json", "x-apikey": this.apiKey!, "User-Agent": this.userAgent },
         redirect: "follow",
         signal: AbortSignal.timeout(this.timeoutMs),
         cache: "no-store",
