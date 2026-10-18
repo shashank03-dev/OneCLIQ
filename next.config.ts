@@ -21,7 +21,23 @@ const nextConfig: NextConfig = {
     },
   },
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    const script = [
+      { key: "Content-Type", value: "text/plain; charset=utf-8" },
+      { key: "Cache-Control", value: "public, max-age=300" },
+    ];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      { source: "/install", headers: script },
+      { source: "/install.sh", headers: script },
+      { source: "/install.ps1", headers: script },
+    ];
+  },
+  /** One install URL: PowerShell (`irm …/install | iex`) gets the Windows script, everything else the shell script. */
+  async rewrites() {
+    return [
+      { source: "/install", has: [{ type: "header", key: "user-agent", value: ".*PowerShell.*" }], destination: "/install.ps1" },
+      { source: "/install", destination: "/install.sh" },
+    ];
   },
 };
 

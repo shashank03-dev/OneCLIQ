@@ -6,7 +6,19 @@
 
 ## Install
 
-You need Node.js 20 or newer.
+One line, on macOS or Linux:
+
+```bash
+curl -fsSL https://onecliq-eta.vercel.app/install | sh
+```
+
+On Windows (PowerShell):
+
+```powershell
+irm https://onecliq-eta.vercel.app/install | iex
+```
+
+The installer checks for Node.js 20+, installs from npm without sudo or admin rights, and tells you if anything else is needed. With Node.js already set up, npm works directly:
 
 ```bash
 npm install -g onecliq

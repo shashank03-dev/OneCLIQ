@@ -1,5 +1,5 @@
 import Noise from "@/components/designpass/Noise";
-import { CliShowcase, CopyCommand } from "@/components/cli-showcase";
+import { CliShowcase, InstallCommand } from "@/components/cli-showcase";
 import { MicroLabel } from "@/components/ui/micro-label";
 
 const COMMANDS = [
@@ -54,8 +54,8 @@ export function Cli() {
           binaries for your whole team, and <code className="font-mono text-night-ink">oqgit mcp</code> hands all of it to
           your coding agent. Nothing runs without your say-so.
         </p>
-        <div className="mx-auto mt-8 max-w-sm">
-          <CopyCommand />
+        <div className="mx-auto mt-9 max-w-2xl">
+          <InstallCommand />
         </div>
 
         <div className="mx-auto mt-14 max-w-3xl">

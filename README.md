@@ -121,7 +121,13 @@ Failures return an `ok: false` object with an `error.code` and `error.message`. 
 
 ## CLI setup and commands
 
-Install from npm (Node.js 20+). The package is `onecliq`, and the command is `oqgit`:
+Install with one line (macOS/Linux; on Windows use `irm https://onecliq-eta.vercel.app/install | iex` in PowerShell):
+
+```bash
+curl -fsSL https://onecliq-eta.vercel.app/install | sh
+```
+
+Or from npm (Node.js 20+). The package is `onecliq`, and the command is `oqgit`:
 
 ```bash
 npm install -g onecliq
