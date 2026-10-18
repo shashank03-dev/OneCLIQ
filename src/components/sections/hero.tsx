@@ -1,4 +1,5 @@
-import { ArrowRight, BadgeCheck, BookOpenCheck, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, BookOpenCheck, GitPullRequest } from "lucide-react";
 import BlurText from "@/components/designpass/BlurText";
 import SoftPatterns from "@/components/designpass/SoftPatterns";
 import { Resolver } from "@/components/resolver";
@@ -8,7 +9,7 @@ import { Landscape } from "@/components/ui/landscape";
 
 export function Hero() {
   return (
-    <section className="relative isolate overflow-hidden pb-[clamp(220px,32vw,420px)]">
+    <section className="relative isolate overflow-hidden pb-[clamp(170px,24vw,320px)]">
       <SoftPatterns
         pattern="dots"
         backgroundColor="var(--paper)"
@@ -30,7 +31,7 @@ export function Hero() {
         <HeroTiles />
 
         <div className="relative flex flex-col items-center pt-24 text-center sm:pt-28">
-          <a
+          <Link
             href="/skills"
             className="group inline-flex items-center gap-2 rounded-full border border-rule bg-paper-raised/80 py-1 pl-1 pr-3 text-[13px] text-ink-muted shadow-tile backdrop-blur transition-[color,transform] hover:-translate-y-0.5 hover:text-ink"
           >
@@ -39,7 +40,7 @@ export function Hero() {
             </span>
             <span className="text-shimmer">{SKILLS.length} agent skills for your coding agent</span>
             <ArrowRight aria-hidden className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-          </a>
+          </Link>
 
           <h1 className="mt-6 max-w-4xl text-balance font-serif text-[clamp(46px,7.4vw,96px)] font-normal leading-[0.98] tracking-[-0.02em]">
             <span className="sr-only">The right download from any GitHub release</span>
@@ -55,8 +56,8 @@ export function Hero() {
           </h1>
 
           <p className="mt-6 max-w-xl text-pretty text-[17px] leading-relaxed text-ink-muted">
-            Paste a repository or release link. We find the latest stable release and the file built for your
-            operating system and CPU, then hand you the link straight from GitHub.
+            Paste a GitHub repository link below. OneCLIQ finds the latest stable release, picks the one file built
+            for your computer, and checks it before you download. No sign-up, nothing to install.
           </p>
         </div>
 
@@ -64,24 +65,29 @@ export function Hero() {
           <Resolver />
         </div>
 
-        <ul className="relative mx-auto mt-6 flex max-w-2xl flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[13px] text-ink-muted">
+        <div className="relative mx-auto mt-7 flex max-w-2xl flex-wrap items-center justify-center gap-2 text-[13.5px]">
+          <span className="mr-1 text-ink-subtle">Here for something else?</span>
           {[
-            { Icon: BadgeCheck, text: "Provenance + malware check" },
-            { Icon: Sparkles, text: "PR review with Gemma 4" },
-            { Icon: BookOpenCheck, text: "Agent skills over MCP" },
-          ].map(({ Icon, text }) => (
-            <li key={text} className="inline-flex items-center gap-1.5">
+            { Icon: GitPullRequest, text: "Review a pull request", href: "/review" },
+            { Icon: BookOpenCheck, text: "Add skills to your coding agent", href: "/skills" },
+          ].map(({ Icon, text, href }) => (
+            <Link
+              key={href}
+              href={href}
+              className="group inline-flex items-center gap-1.5 rounded-full border border-rule bg-paper-raised/80 px-3 py-1.5 text-ink-muted backdrop-blur transition-[color,border-color,transform] hover:-translate-y-0.5 hover:border-rule-strong hover:text-ink"
+            >
               <Icon aria-hidden className="size-3.5 text-ember" />
               {text}
-            </li>
+              <ArrowRight aria-hidden className="size-3 opacity-50 transition-[opacity,transform] group-hover:translate-x-0.5 group-hover:opacity-100" />
+            </Link>
           ))}
-        </ul>
+        </div>
       </div>
 
       <Landscape
         variant="hero"
         priority
-        className="top-auto h-[clamp(260px,36vw,520px)] [mask-image:linear-gradient(to_bottom,transparent,black_30%)]"
+        className="top-auto h-[clamp(220px,30vw,440px)] [mask-image:linear-gradient(to_bottom,transparent,black_30%)]"
       />
     </section>
   );

@@ -45,6 +45,13 @@ const ERROR_TITLES: Record<ErrorCode, string> = {
   AI_RATE_LIMITED: "Review quota reached",
 };
 
+/** `?repo=owner/repo` (or a full GitHub link) from the page URL, as a link the resolver accepts. */
+function sharedRepo(): string | null {
+  const raw = new URLSearchParams(window.location.search).get("repo")?.trim();
+  if (!raw) return null;
+  return /^(https?:\/\/)?(www\.)?github\.com\//i.test(raw) ? raw : `https://github.com/${raw.replace(/^\/+/, "")}`;
+}
+
 type State =
   | { kind: "idle" }
   | { kind: "loading" }
@@ -71,11 +78,19 @@ export function Resolver() {
         // Only pre-fill what the browser actually told us; otherwise leave it for the user.
         if (d.os) setOs((cur) => cur || d.os!);
         if (d.os && d.arch && ARCHES_FOR_OS[d.os].includes(d.arch)) setArch((cur) => cur || d.arch!);
+        // Shareable links: /download?repo=owner/repo fills the box, and runs it when we know the system.
+        const shared = sharedRepo();
+        if (shared) {
+          setUrl(shared);
+          if (!d.mobile && d.os && d.arch && ARCHES_FOR_OS[d.os].includes(d.arch)) void submit(shared, { os: d.os, arch: d.arch });
+        }
       })
       .catch(() => setDetected({ mobile: false }));
     return () => {
       cancelled = true;
     };
+    // Runs once on mount; submit() gets the detected system passed in, so its stale closure is fine.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function changeOs(next: Os | "") {
@@ -83,7 +98,9 @@ export function Resolver() {
     if (next && arch && !ARCHES_FOR_OS[next].includes(arch)) setArch("");
   }
 
-  async function submit(value = url) {
+  async function submit(value = url, system?: { os: Os; arch: Arch }) {
+    const pickedOs = system?.os ?? os;
+    const pickedArch = system?.arch ?? arch;
     setFieldError(null);
     try {
       parseGitHubUrl(value);
@@ -92,7 +109,7 @@ export function Resolver() {
       inputRef.current?.focus();
       return;
     }
-    if (!os || !arch) {
+    if (!pickedOs || !pickedArch) {
       setState({ kind: "error", code: "INVALID_REQUEST", message: "Choose your operating system and architecture first." });
       return;
     }
@@ -103,7 +120,7 @@ export function Resolver() {
     setState({ kind: "loading" });
 
     try {
-      const body = await postJson<ResolveResponse>("/api/resolve", { url: value, os, arch }, controller.signal);
+      const body = await postJson<ResolveResponse>("/api/resolve", { url: value, os: pickedOs, arch: pickedArch }, controller.signal);
       if (body.ok) {
         setState({ kind: "success", result: body });
       } else if (body.error.code === "INVALID_URL") {

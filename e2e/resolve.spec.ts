@@ -81,7 +81,8 @@ test("shows Not recommended when the release only has source code", async ({ pag
   await resolve(page, "https://github.com/acme/lib", "windows", "x64");
   await expect(page.getByTestId("status-badge")).toHaveText("Not recommended — don’t install");
   await expect(page.getByTestId("no-match-message")).toContainText("only ships source code");
-  await expect(page.getByRole("link", { name: "Download" })).toHaveCount(0);
+  // The page itself links to /download; only the result card must offer no file.
+  await expect(page.getByTestId("result-card").getByRole("link", { name: "Download" })).toHaveCount(0);
 });
 
 test("shows Not recommended for ambiguous matches", async ({ page }) => {

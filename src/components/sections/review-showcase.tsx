@@ -73,7 +73,7 @@ export function ReviewShowcase() {
   const shown = FINDINGS.map((f, i) => ({ ...f, i })).filter((f) => filter === "all" || f.severity === filter);
 
   return (
-    <section id="review" aria-labelledby="review-heading" className="relative isolate scroll-mt-20 overflow-hidden bg-paper py-24 sm:py-32">
+    <section id="sample" aria-labelledby="review-heading" className="relative isolate scroll-mt-20 overflow-hidden border-t border-rule bg-paper py-24 sm:py-28">
       <SoftPatterns
         pattern="dots"
         backgroundColor="var(--paper)"
@@ -87,7 +87,7 @@ export function ReviewShowcase() {
       <div className="mx-auto grid max-w-6xl gap-14 px-5 sm:px-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-center lg:gap-16">
         <Reveal>
           <MicroLabel className="inline-flex items-center gap-2 rounded-full border border-rule bg-paper-raised px-3 py-1.5 text-ink-subtle">
-            <Sparkles aria-hidden className="size-3 text-ember" /> Powered by Gemma 4
+            <Sparkles aria-hidden className="size-3 text-ember" /> Sample review · Gemma 4
           </MicroLabel>
           <h2 id="review-heading" className="mt-7 max-w-lg text-balance font-serif text-[clamp(44px,5vw,68px)] font-normal leading-[0.98] tracking-[-0.025em]">
             A pull request review that <em>says</em> what to do next.
@@ -110,8 +110,8 @@ export function ReviewShowcase() {
             ))}
           </ul>
           <div className="mt-10 flex flex-wrap items-center gap-3">
-            <PillButton href="/review" icon={<GitPullRequest aria-hidden className="size-4" />} className="transition-transform active:scale-95">
-              Review a PR
+            <PillButton href="#reviewer" icon={<GitPullRequest aria-hidden className="size-4" />} className="transition-transform active:scale-95">
+              Try it on your PR
             </PillButton>
             <code className="rounded-full border border-rule bg-paper-raised px-4 py-2.5 font-mono text-[12.5px] text-ink-muted">
               oqgit review 42 --strict
