@@ -18,9 +18,9 @@ export const isLowSignal = (path: string) => LOW_SIGNAL.some((re) => re.test(pat
 export interface PackedDiff {
   text: string;
   included: ChangedFile[];
-  /** Not sent on purpose: lockfiles, generated output, binaries, no text diff. */
+  /** Not sent on purpose: lockfiles, generated output, known binary formats. */
   skipped: string[];
-  /** Real source that didn't fit the budget, or was cut short. The review can't vouch for these. */
+  /** Source without a patch, beyond the budget or cut short. The review can't vouch for these. */
   unreviewed: string[];
 }
 
@@ -32,8 +32,13 @@ export function packDiff(files: ChangedFile[], budget = DEFAULT_DIFF_BUDGET): Pa
   const unreviewed: string[] = [];
   let used = 0;
   for (const f of files) {
-    if (!f.patch || isLowSignal(f.path)) {
+    if (isLowSignal(f.path)) {
       skipped.push(f.path);
+      continue;
+    }
+    // GitHub can omit a large source patch. Missing code is a coverage gap, not a safe skip.
+    if (!f.patch) {
+      unreviewed.push(f.path);
       continue;
     }
     const head = `### ${f.path} (${f.status}, +${f.additions} −${f.deletions})\n`;
@@ -111,7 +116,7 @@ export function buildUserPrompt(ctx: ReviewContext, packed: PackedDiff): string 
     "## Diff",
     packed.text || "(no textual diff)",
     packed.skipped.length ? `\nFiles changed but not shown (lockfiles, generated or binary): ${packed.skipped.slice(0, 40).join(", ")}${packed.skipped.length > 40 ? " …" : ""}` : "",
-    packed.unreviewed.length ? `\nFiles left out or cut short to fit the input limit (don't guess about them): ${packed.unreviewed.slice(0, 40).join(", ")}${packed.unreviewed.length > 40 ? " …" : ""}` : "",
+    packed.unreviewed.length ? `\nFiles not fully reviewed because of missing text diffs or the input limit (don't guess about them): ${packed.unreviewed.slice(0, 40).join(", ")}${packed.unreviewed.length > 40 ? " …" : ""}` : "",
     "</change>",
     "",
     ctx.goal?.trim()

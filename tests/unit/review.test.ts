@@ -105,6 +105,14 @@ describe("buildFixPrompt", () => {
 });
 
 describe("packDiff", () => {
+  it("treats source files without a GitHub patch as unreviewed", () => {
+    const packed = packDiff([
+      CTX.files[0],
+      { path: "large-source.ts", status: "modified", additions: 10, deletions: 10 },
+    ]);
+    expect(packed.unreviewed).toEqual(["large-source.ts"]);
+    expect(packed.skipped).toEqual([]);
+  });
   it("skips lockfiles and marks what didn't fit as unreviewed", () => {
     const big = "x".repeat(500);
     const packed = packDiff(
@@ -330,6 +338,24 @@ describe("GitHubPrClient", () => {
     await expect(
       new GitHubPrClient({ fetch: impl, publicOnly: true }).getContext({ kind: "pr", owner: "acme", repo: "secret", number: 1 }),
     ).rejects.toMatchObject({ code: "REPO_NOT_FOUND" });
+  });
+
+  it("refuses a PR when GitHub's file count exceeds the retrieved context", async () => {
+    const { impl } = github({
+      "/repos/acme/tool/pulls/7/files": [{ filename: "a.ts", status: "modified", additions: 1, deletions: 1, patch: "@@" }],
+      "/repos/acme/tool/pulls/7/commits": [],
+      "/repos/acme/tool/pulls/7": { number: 7, title: "Large PR", state: "open", changed_files: 301, html_url: "https://github.com/acme/tool/pull/7", base: { ref: "main" }, head: { ref: "feature" } },
+      "/repos/acme/tool": { private: false, default_branch: "main" },
+    });
+    await expect(new GitHubPrClient({ fetch: impl }).getContext({ kind: "pr", owner: "acme", repo: "tool", number: 7 })).rejects.toThrow(/complete file list/);
+  });
+
+  it("refuses branch comparisons at GitHub's 300-file response limit", async () => {
+    const { impl } = github({
+      "/repos/acme/tool/compare/": { commits: [], files: Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}.ts`, status: "modified", additions: 1, deletions: 1, patch: "@@" })) },
+      "/repos/acme/tool": { private: false, default_branch: "main" },
+    });
+    await expect(new GitHubPrClient({ fetch: impl }).getContext({ kind: "branch", owner: "acme", repo: "tool", head: "feature" })).rejects.toThrow(/file limit/);
   });
 
   it("compares a branch against the default branch", async () => {

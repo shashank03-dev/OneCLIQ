@@ -56,7 +56,7 @@ The published package is `onecliq` on npm (`npm install -g onecliq`); maintainer
 
 ## Add skills to your coding agent
 
-`oqgit` ships a library of 43 [Agent Skills](https://agentskills.io) for developers in 9 domains (workflow, frontend, backend, DevOps, security, testing, AI engineering, git workflow, languages).
+`oqgit` ships a library of 44 [Agent Skills](https://agentskills.io) for developers in 9 domains (workflow, frontend, backend, DevOps, security, testing, AI engineering, git workflow, languages).
 
 ```bash
 oqgit skills                                   # browse by domain
@@ -177,15 +177,48 @@ Useful flags: `-g, --goal` tells the reviewer what the change should achieve, `-
 
 ## Use with coding agents
 
-`oqgit mcp` starts a Model Context Protocol (MCP) server on standard input and output. It offers tools for resolving releases, trust reports, malware checks, release diffs, file verification, and lock checks. Downloads are disabled unless you start it with `--allow-download`.
+**Release status:** MCP PR reviews, the `review` prompt and the `onecliq-review` shortcut are in this source tree, but not in the published `onecliq@0.2.0` package. Until a new npm release is published, use the [source installation](#install-from-source) above. A GitHub push does not update npm.
 
-For example, after installing the CLI, Claude Code can register it with:
+`oqgit mcp` starts a Model Context Protocol (MCP) server on standard input and output. It exposes `review_change` for Gemma PR/branch/local reviews, `get_review_context` for your agent's own review, and a `review` prompt. Release, trust, malware, verification, lock and skill tools remain available. Downloads are disabled unless you start it with `--allow-download`.
+
+After building from source, choose one command from the repository root (macOS/Linux):
 
 ```bash
-claude mcp add oqgit -- oqgit mcp
+claude mcp add oqgit -- node "$PWD/cli/dist/oqgit.mjs" mcp
+codex mcp add oqgit -- node "$PWD/cli/dist/oqgit.mjs" mcp
+gemini mcp add oqgit node "$PWD/cli/dist/oqgit.mjs" mcp
 ```
 
-Consult your MCP client's documentation for its registration format. The MCP server does not install or execute downloaded files.
+In PowerShell, use `"$($PWD.Path)/cli/dist/oqgit.mjs"` for the bundle path. If you installed the local build globally with `npm install -g ./cli`, you can instead register `oqgit mcp`.
+
+Refresh the agent session and confirm that `review_change` and `get_review_context` appear in its MCP tools. Then use one of these; public PR reviews with your agent's own model need no Gemini key:
+
+```text
+Claude Code: /oqgit:review https://github.com/owner/repo/pull/12
+Gemini CLI: /review https://github.com/owner/repo/pull/12
+Any connected agent: Use oqgit to review https://github.com/owner/repo/pull/12
+```
+
+For an optional tagged Codex workflow, run `node /absolute/path/to/OneCLIQ/cli/dist/oqgit.mjs skills add onecliq-review --agent codex` in the project you want to review, refresh skills, then type `$onecliq-review <PR URL>` or choose it in `/skills`. Claude can install the same skill with `--agent claude` and use `/onecliq-review`. Plain-language requests do not require a skill. Command discovery is provided by the client; it is not a universal `@oqgit` mention.
+
+Gemma requires `GEMINI_API_KEY`, `GEMINI_API_KEYS` or `GOOGLE_API_KEY` in the server environment. Without one, the prompt/skill fetches context for a clearly labeled **host-agent review** using the connected agent's own model. `get_review_context` caps the diff at 60,000 characters and lists omitted/truncated files; partial reviews cannot establish safe-to-merge status. This context-only tool makes no Gemini call. Model reviews send the diff to the Gemini API and return the same structured verdict and fix prompt as `oqgit review`.
+
+Pass `GITHUB_TOKEN` or `GH_TOKEN` to the server for private PRs. Set the server's `cwd` to the intended repository for bare PR numbers or local reviews; untracked local files require `git add -N`. The CLI does not automatically load `.env` files. Restart the MCP server after changing its environment.
+
+Allow at least **360 seconds** for tool calls (Gemma has a five-minute review budget). For Codex, merge into `~/.codex/config.toml` or your trusted project's `.codex/config.toml`:
+
+```toml
+[mcp_servers.oqgit]
+command = "node"
+args = ["/absolute/path/to/OneCLIQ/cli/dist/oqgit.mjs", "mcp"]
+tool_timeout_sec = 360
+env_vars = ["GEMINI_API_KEY", "GEMINI_API_KEYS", "GOOGLE_API_KEY", "GITHUB_TOKEN", "GH_TOKEN"]
+# cwd = "/absolute/path/to/your/repository"
+```
+
+For Claude, launch with `MCP_TOOL_TIMEOUT=360000`; Gemini accepts `timeout: 360000` in its server settings. See [Claude MCP](https://code.claude.com/docs/en/mcp), [Gemini MCP](https://geminicli.com/docs/tools/mcp-server/), and [Codex MCP](https://developers.openai.com/codex/mcp) for credential forwarding and client-specific settings. Never commit secret values. The review workflow does not edit code, post GitHub comments or merge PRs.
+
+Live verification of a temporary source installation completed a real Codex review of public PR #12 with all four file diffs, including the no-Gemini-key fallback. Claude's project-level add/get/remove commands passed; live Claude and Gemma reviews were unavailable without credentials. The temporary installation and connections were removed afterward.
 
 ## Configuration, files, and limitations
 

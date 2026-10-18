@@ -39,6 +39,11 @@ beforeAll(async () => {
       res.end(JSON.stringify(body));
     };
     if (req.url === "/repos/acme/tool/releases/latest") json(200, release);
+    else if (req.url === "/repos/acme/tool") json(200, { private: false, default_branch: "main" });
+    else if (req.url === "/repos/acme/tool/pulls/7") json(200, { number: 7, title: "Retry uploads", state: "open", html_url: "https://github.com/acme/tool/pull/7", base: { ref: "main" }, head: { ref: "retry" }, changed_files: 1 });
+    else if (req.url?.startsWith("/repos/acme/tool/pulls/7/files?")) json(200, [{ filename: "a.ts", status: "modified", additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n-old\n+retry()" }]);
+    else if (req.url?.startsWith("/repos/acme/tool/pulls/7/commits?")) json(200, []);
+    else if (req.url?.startsWith("/models/")) json(200, { candidates: [{ content: { parts: [{ text: JSON.stringify({ summary: "Retry drops failures.", suggestedTitle: "fix: persist retries", intent: "matches", findings: [{ severity: "high", title: "Upload lost", file: "a.ts", line: 1, detail: "Failed retries lose the upload.", fix: "Persist before retrying." }], testsToAdd: [] }) }] } }] });
     else json(404, { message: "Not Found" });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -57,7 +62,7 @@ function runCli(args: string[]): Promise<Run> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, ["--import", "tsx", "cli/src/bin.ts", ...args], {
       cwd: root,
-      env: { ...process.env, OQGIT_API_BASE: apiBase, OQGIT_MIN_AGE: "", NO_COLOR: "1" },
+      env: { ...process.env, OQGIT_API_BASE: apiBase, OQGIT_GEMINI_API_BASE: apiBase, GEMINI_API_KEY: "test-only", GEMINI_API_KEYS: "", GOOGLE_API_KEY: "", OQGIT_MIN_AGE: "", NO_COLOR: "1" },
     });
     let stdout = "";
     let stderr = "";
@@ -80,5 +85,20 @@ describe("oqgit exit behavior", () => {
     expect(r.stderr).not.toMatch(/Assertion failed/);
     expect(r.stderr).toMatch(/couldn't find a public repository/);
     expect(r.code).toBe(1);
+  }, 30_000);
+
+  it("preserves strict review exit codes and JSON output through the shared service", async () => {
+    const r = await runCli(["review", "acme/tool#7", "--json", "--strict", "--fast"]);
+    expect(r.code).toBe(4);
+    expect(r.stderr).toBe("");
+    expect(JSON.parse(r.stdout)).toMatchObject({ ok: true, verdict: { safeToMerge: false }, findings: [{ title: "Upload lost", file: "a.ts" }] });
+  }, 30_000);
+
+  it("keeps prompt-only review output suitable for piping", async () => {
+    const r = await runCli(["review", "acme/tool#7", "--prompt-only"]);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe("");
+    expect(r.stdout).toContain("Upload lost");
+    expect(r.stdout).not.toContain('"findings":');
   }, 30_000);
 });

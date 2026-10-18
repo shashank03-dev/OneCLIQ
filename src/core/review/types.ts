@@ -143,9 +143,9 @@ export interface ReviewResult {
     filesChanged: number;
     additions: number;
     deletions: number;
-    /** Not sent on purpose: lockfiles, generated output, binaries. */
+    /** Not sent on purpose: lockfiles, generated output, known binary formats. */
     skippedFiles: string[];
-    /** Source left out or cut short to fit the model's input limit. Their presence blocks "safe" and "ready". */
+    /** Source missing a patch, left out or cut short. Their presence blocks "safe" and "ready". */
     unreviewedFiles: string[];
   };
   title: { current: string; suggested: string };

@@ -30,6 +30,7 @@ const PullSchema = z.object({
   draft: z.boolean().optional().nullable(),
   merged: z.boolean().optional().nullable(),
   merged_at: z.string().nullable().optional(),
+  changed_files: z.number().int().nonnegative().optional(),
   html_url: z.string().url(),
   user: z.object({ login: z.string().max(100) }).nullable().optional(),
   base: z.object({ ref: z.string().max(255) }),
@@ -86,6 +87,9 @@ export class GitHubPrClient {
         this.paged(`${repoPath}/pulls/${target.number}/files`, FileSchema, Math.ceil(MAX_FILES / 100)),
         this.paged(`${repoPath}/pulls/${target.number}/commits`, CommitSchema, 3),
       ]);
+      if (pr.changed_files !== undefined ? pr.changed_files > files.length : files.length >= MAX_FILES) {
+        throw new ResolveError("INVALID_REQUEST", "GitHub did not provide the complete file list for this PR within the 300-file review limit. Split the change into smaller PRs before reviewing it.");
+      }
       return {
         source: "pr",
         repo: name,
@@ -109,6 +113,9 @@ export class GitHubPrClient {
       CompareSchema,
       () => new ResolveError("PR_NOT_FOUND", `Couldn't compare ${base}...${target.head} in ${name}. Check both branches exist.`),
     );
+    if (cmp.files.length >= MAX_FILES) {
+      throw new ResolveError("INVALID_REQUEST", "This comparison reaches GitHub's 300-file limit, so its coverage cannot be verified. Review a smaller change or open smaller pull requests.");
+    }
     const commits = cmp.commits.map(subject);
     return {
       source: "branch",

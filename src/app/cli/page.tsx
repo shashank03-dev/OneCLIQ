@@ -138,8 +138,8 @@ export default function CliPage() {
                 Hand it all to your <em>agent</em>.
               </h2>
               <p className="mt-4 max-w-md text-[15px] leading-relaxed text-ink-muted">
-                Add oqgit as an MCP server once. Your agent can then search and install skills, resolve releases, read
-                trust reports and check for malware. Downloads only happen if you start it with{" "}
+                Connect oqgit once, then ask your agent to review a PR or use its review shortcut. It can also search
+                and install skills, resolve releases, read trust reports and check for malware. Downloads happen with{" "}
                 <code className="font-mono text-ink">--allow-download</code>.
               </p>
               <div className="mt-6 flex max-w-sm items-center gap-3 rounded-full border border-rule bg-paper-raised py-1.5 pl-5 pr-1.5 font-mono text-[13px]">

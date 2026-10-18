@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { E2E_GITHUB_TOKEN } from "./e2e/test-env";
 
 const MOCK_PORT = 4010;
 const APP_PORT = 3100;
@@ -31,6 +32,7 @@ export default defineConfig({
       command: `npx next start -p ${APP_PORT} -H 127.0.0.1`,
       env: {
         GITHUB_API_BASE_URL: `http://127.0.0.1:${MOCK_PORT}`,
+        GITHUB_TOKEN: E2E_GITHUB_TOKEN,
         RESOLVE_RATE_LIMIT_PER_MIN: "1000",
       },
       port: APP_PORT,

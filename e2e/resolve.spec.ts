@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { E2E_GITHUB_TOKEN } from "./test-env";
 
 async function resolve(page: Page, url: string, os: string, arch: string) {
   await page.goto("/");
@@ -139,11 +140,15 @@ test("is keyboard operable", async ({ page }) => {
 });
 
 test("never exposes the GitHub token to the browser", async ({ page }) => {
-  const bodies: string[] = [];
-  page.on("response", async (r) => {
-    if (r.url().includes("/api/resolve") || r.url().endsWith(".js")) bodies.push(await r.text().catch(() => ""));
+  const responses: Promise<string>[] = [];
+  page.on("response", (r) => {
+    if (r.url().includes("/api/resolve") || r.url().endsWith(".js")) responses.push(r.text().catch(() => ""));
   });
   await resolve(page, "https://github.com/acme/desktop", "linux", "x64");
   await expect(page.getByTestId("result-card")).toBeVisible();
-  expect(bodies.join("\n")).not.toMatch(/GITHUB_TOKEN|ghp_|github_pat_/);
+  const bodies = await Promise.all(responses);
+  expect(bodies.some((body) => body.includes('"ok":true'))).toBe(true);
+  // Public setup instructions may name GITHUB_TOKEN; the credential's value must stay server-side.
+  const credentialLeaked = bodies.some((body) => body.includes(E2E_GITHUB_TOKEN) || /ghp_|github_pat_/.test(body));
+  expect(credentialLeaked, "Server credentials must not appear in API responses or browser JavaScript").toBe(false);
 });

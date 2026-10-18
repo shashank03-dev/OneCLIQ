@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/shashank03-dev/OneCLIQ/actions/workflows/ci.yml/badge.svg)](https://github.com/shashank03-dev/OneCLIQ/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/onecliq?label=npm%20%C2%B7%20onecliq)](https://www.npmjs.com/package/onecliq)
-[![Agent Skills](https://img.shields.io/badge/agent%20skills-43-7c6cf0)](skills)
+[![Agent Skills](https://img.shields.io/badge/agent%20skills-44-7c6cf0)](skills)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [**Open OneCLIQ**](https://onecliq-eta.vercel.app) · [Start here](https://onecliq-eta.vercel.app/start) · [Download](https://onecliq-eta.vercel.app/download) · [Review](https://onecliq-eta.vercel.app/review) · [Skills](https://onecliq-eta.vercel.app/skills) · [CLI](https://onecliq-eta.vercel.app/cli)
@@ -237,27 +237,93 @@ More detail is in the [CLI README](cli/README.md).
 
 ## Connect your coding agent (MCP)
 
-This part is optional. Add OneCLIQ once, then ask your agent in plain words, for example: *"find a skill for safe database migrations and install it."*
+Connect once, then ask your coding agent: **"Use oqgit to review https://github.com/owner/repo/pull/12."** Public PR reviews using your agent's own model do not need a Gemini key. You need Node.js 20+ and a coding agent with MCP support.
+
+**Release status:** the new MCP review tools, `review` prompt and `onecliq-review` skill are available in this source tree. The published npm package, `onecliq@0.2.0`, does not include them yet. Pushing to GitHub does not publish a new npm release.
+
+### Quick start from source
+
+Build the CLI:
 
 ```bash
-claude mcp add oqgit -- npx -y onecliq mcp     # Claude Code
-codex mcp add oqgit -- npx -y onecliq mcp      # Codex CLI
-gemini mcp add oqgit npx -y onecliq mcp        # Gemini CLI
+git clone https://github.com/shashank03-dev/OneCLIQ.git
+cd OneCLIQ
+npm ci
+npm run cli:build
 ```
 
-For Cursor or VS Code, add this as the `oqgit` server in `.cursor/mcp.json` or `.vscode/mcp.json`:
+If you already have this checkout, run `npm ci` and `npm run cli:build` from its root. Then choose **one** registration command, while still in that directory:
+
+| Agent | Registration command (macOS/Linux) |
+| --- | --- |
+| Claude Code | `claude mcp add oqgit -- node "$PWD/cli/dist/oqgit.mjs" mcp` |
+| Codex CLI | `codex mcp add oqgit -- node "$PWD/cli/dist/oqgit.mjs" mcp` |
+| Gemini CLI | `gemini mcp add oqgit node "$PWD/cli/dist/oqgit.mjs" mcp` |
+
+In PowerShell, use `"$($PWD.Path)/cli/dist/oqgit.mjs"` for the bundle path. The registration command stores its absolute location, so keep the checkout there.
+
+For Cursor, merge this into `.cursor/mcp.json`, replacing the bundle path with your actual absolute path:
 
 ```json
-{ "command": "npx", "args": ["-y", "onecliq", "mcp"] }
+{ "mcpServers": { "oqgit": { "command": "node", "args": ["/absolute/path/to/OneCLIQ/cli/dist/oqgit.mjs", "mcp"] } } }
 ```
 
-**Tools the server offers:** `search_skills`, `get_skill`, `install_skill`, `resolve_release`, `release_trust`, `check_malware`, `release_diff`, `verify_file` and `lock_check`. Start it with `--allow-download` to also enable `download_release`. Downloads are verified and never run.
+VS Code uses the same server entry under `servers` in `.vscode/mcp.json` instead of `mcpServers`.
+
+Refresh the agent session and enable oqgit in its tools picker where required. Check that **`review_change` and `get_review_context`** are available, then send the review request above. If those tools are missing, check that the server launches the newly built bundle rather than the npm release. Existing release and skill tools are also available.
+
+### Request a review from your agent
+
+| Client | Invocation after connecting |
+| --- | --- |
+| Claude Code | `/oqgit:review https://github.com/owner/repo/pull/12` (also `/mcp__oqgit__review …`) |
+| Gemini CLI | `/review https://github.com/owner/repo/pull/12` (check `/help` for conflicts with other servers) |
+| Codex | Install the shortcut below, then `$onecliq-review https://github.com/owner/repo/pull/12` or select it in `/skills` |
+| Cursor / VS Code | Enable oqgit's tools, then ask “Use oqgit to review this PR: …” |
+
+For the optional tagged Codex shortcut, run this **in the project you want to review**, replacing the bundle path:
+
+```bash
+node /absolute/path/to/OneCLIQ/cli/dist/oqgit.mjs skills add onecliq-review --agent codex
+```
+
+Refresh the agent's skills afterward. Use `--agent claude` to install the Claude shortcut `/onecliq-review`. Plain-language requests do not require installing a skill.
+
+These commands follow each host's [Claude MCP prompt](https://code.claude.com/docs/en/mcp#use-mcp-prompts-as-commands), [Gemini MCP prompt](https://geminicli.com/docs/tools/mcp-server/#mcp-prompts-as-slash-commands) and [Codex skill](https://developers.openai.com/codex/skills) support. A universal `@oqgit` mention is not assumed.
+
+### Optional: Gemma and private repositories
+
+`review_change` runs the same Gemma review as `oqgit review`: ranked findings, file/line references, explicit coverage, a deterministic merge verdict and one fix prompt. Set `GEMINI_API_KEY`, `GEMINI_API_KEYS` or `GOOGLE_API_KEY` in the **MCP server's environment**. If no key is configured, the prompt/skill uses `get_review_context` so the connected agent can review the bounded diff using its own model. Host-agent reviews are labeled separately. A review reads code; it does not edit files, post to GitHub, or merge.
+
+Pass `GITHUB_TOKEN` or `GH_TOKEN` for private repositories. PR numbers and omitted targets use the MCP server's working directory: start it in the intended repository or set the client's `cwd`. Omitted target reviews tracked local changes against the default base; untracked files require `git add -N`. No `.env` file is loaded automatically by the CLI. Keys remain in the server environment; do not paste them into chat or commit them to configuration.
+
+Missing source patches count as unreviewed. Reviews refuse a PR when GitHub's declared file count exceeds the retrieved context, and branch comparisons at GitHub's 300-file response limit, to avoid giving a verdict on unseen code.
+
+Gemma reviews can take five minutes. Set the client's tool timeout to at least **360 seconds**. For Codex, merge the following into the existing oqgit server entry in `~/.codex/config.toml` (or a trusted project's `.codex/config.toml`):
+
+```toml
+[mcp_servers.oqgit]
+command = "node"
+args = ["/absolute/path/to/OneCLIQ/cli/dist/oqgit.mjs", "mcp"]
+startup_timeout_sec = 60
+tool_timeout_sec = 360
+env_vars = ["GEMINI_API_KEY", "GEMINI_API_KEYS", "GOOGLE_API_KEY", "GITHUB_TOKEN", "GH_TOKEN"]
+# cwd = "/absolute/path/to/your/repository"
+```
+
+Codex documents [environment forwarding and tool timeouts](https://developers.openai.com/codex/mcp). For Claude Code, set `MCP_TOOL_TIMEOUT=360000` when launching the client; Gemini's server entry supports `timeout: 360000`. Configure credentials using the host's environment forwarding/settings. If credentials change, restart the MCP server.
+
+After a new npm release includes these tools, you can register the server without a checkout, for example `codex mcp add oqgit -- npx -y onecliq mcp` (Claude uses the same argument shape; Gemini uses `gemini mcp add oqgit npx -y onecliq mcp`). Until then, use the source build above.
+
+**Live verification:** a temporary installation of the source build completed a real Codex review of [PR #12](https://github.com/shashank03-dev/OneCLIQ/pull/12), fetching all four changed files over MCP and using the host model after `AI_NOT_CONFIGURED`. Claude's project-level add/get/remove commands passed. A live Claude review and a live Gemma call were not run because their credentials were unavailable. All temporary installations and connections were removed afterward.
+
+**Tools the server offers:** `review_change`, `get_review_context`, `search_skills`, `get_skill`, `install_skill`, `resolve_release`, `release_trust`, `check_malware`, `release_diff`, `verify_file` and `lock_check`. It also exposes the `review` MCP prompt. Start with `--allow-download` to enable `download_release`. Downloads are verified and never run.
 
 ---
 
 ## The skill library
 
-43 hand-written skills in 9 areas. Each is a plain `SKILL.md` file that follows the open [Agent Skills](https://agentskills.io) standard, and CI checks every one.
+44 hand-written skills in 9 areas. Each is a plain `SKILL.md` file that follows the open [Agent Skills](https://agentskills.io) standard, and CI checks every one.
 
 | Area | Skills |
 | --- | --- |
@@ -268,7 +334,7 @@ For Cursor or VS Code, add this as the `oqgit` server in `.cursor/mcp.json` or `
 | Security | `secure-code-review` · `auth-best-practices` · `secrets-hygiene` · `supply-chain-verify` |
 | Testing | `test-driven-development` · `write-unit-tests` · `flaky-test-triage` · `playwright-e2e` · `exploratory-qa` |
 | AI engineering | `gemma-4-prompting` · `llm-evals` · `mcp-server-builder` · `write-agent-skills` · `context-engineering` |
-| Git | `pull-request-review` · `conventional-commits` · `git-recovery` · `git-worktrees` |
+| Git | `onecliq-review` · `pull-request-review` · `conventional-commits` · `git-recovery` · `git-worktrees` |
 | Languages | `typescript-type-design` · `go-idioms` |
 
 ### Skill commands
@@ -428,7 +494,7 @@ POST routes take JSON bodies up to 4 KB. Errors look like `{"ok": false, "error"
 | Track | How OneCLIQ fits |
 | --- | --- |
 | Best Use of Gemma 4 | Code review runs on `gemma-4-31b-it`, with the `gemma-4-26b-a4b-it` mixture-of-experts model as a fast fallback. A key pool makes it work on free quotas, and the merge verdict is computed from Gemma's structured findings so it is repeatable. |
-| Best Open-Source AI Project | MIT licensed. 43 agent skills that follow the Agent Skills standard (checked in CI), an original zero-dependency MCP server, and a CLI that installs skills into six coding agents. |
+| Best Open-Source AI Project | MIT licensed. 44 agent skills that follow the Agent Skills standard (checked in CI), an original zero-dependency MCP server, and a CLI that installs skills into six coding agents. |
 
 ---
 

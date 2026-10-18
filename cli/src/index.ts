@@ -24,9 +24,10 @@ import { startMcpServer } from "./mcp";
 import { installSkills, parseAgents } from "./skills";
 import { AGENTS, DOMAINS, SKILLS, domainLabel, findSkill, searchSkills, skillMeta, skillSummary, type Skill } from "../../src/core/skills";
 import { copyToClipboard, makeExecutable, openFile, revealFile } from "./open";
-import { GitError, localContext, originRepo } from "./git";
-import { GemmaReviewer, GitHubPrClient, ModelQuotaError, SEVERITY_LABELS, parseApiKeys, parseReviewTarget, reviewChange, type ReviewResult, type Severity } from "../../src/core/review";
-import { loadInputLimit, loadState, saveInputLimit, stateDir, track, untrack } from "./state";
+import { GitError } from "./git";
+import { ModelQuotaError, SEVERITY_LABELS, type ReviewResult, type Severity } from "../../src/core/review";
+import { createReviewService } from "./review";
+import { loadState, stateDir, track, untrack } from "./state";
 import { detectSystem, type SystemInfo } from "./system";
 import { banner, c, card, gradient, isTTY, kv, relativeTime, table } from "./ui";
 
@@ -281,7 +282,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   mcp: {
     usage: "oqgit mcp",
-    about: "Run as an MCP server so coding agents can use oqgit.",
+    about: "Run as an MCP server for PR reviews, local reviews, releases and skills.\nExposes review_change, get_review_context and a review prompt for supported clients.\nGemma needs GEMINI_API_KEY; get_review_context lets your agent review with its own model.",
     flags: [["--allow-download", "let agents download files"]],
     examples: ["claude mcp add oqgit -- oqgit mcp"],
   },
@@ -1629,90 +1630,39 @@ const SEVERITY_TONE: Record<Severity, (s: string) => string> = {
   nit: c.dim,
 };
 
-const reviewKeys = () => parseApiKeys(process.env.GEMINI_API_KEYS, process.env.GEMINI_API_KEY, process.env.GOOGLE_API_KEY);
-
-function fallbackModels(): string[] | undefined {
-  const raw = process.env.OQGIT_REVIEW_FALLBACK_MODELS?.trim();
-  if (!raw) return undefined;
-  return raw.toLowerCase() === "none" ? [] : raw.split(/[\s,]+/).filter(Boolean);
-}
-
-function reviewer(flags: Flags): GemmaReviewer {
-  return new GemmaReviewer({
-    apiKeys: reviewKeys(),
-    fallbackModels: fallbackModels(),
-    model: flags.model || process.env.OQGIT_REVIEW_MODEL || undefined,
-    apiBase: process.env.OQGIT_GEMINI_API_BASE || undefined,
-    thinking: flags.fast ? "minimal" : "high",
-  });
-}
-
 async function cmdReview(target: string | undefined, flags: Flags): Promise<number> {
   const interactive = isTTY && !flags.json && !flags["prompt-only"];
   const pr = flags.pr ? Number(flags.pr) : undefined;
   if (flags.pr && (!Number.isInteger(pr) || pr! < 1)) throw new UsageError("--pr must be a pull request number.");
-  const model = reviewer(flags); // validates the model name before any GitHub calls
-  if (reviewKeys().length === 0) {
-    throw new ResolveError("AI_NOT_CONFIGURED", "Set GEMINI_API_KEY (or GEMINI_API_KEYS) to run reviews. Get a free key at https://aistudio.google.com/apikey.");
-  }
-
   if (interactive) header("review");
   const spin = interactive ? p.spinner() : null;
-
-  // `oqgit review 12` (or `#12`): pull request 12 in this checkout's GitHub repo.
-  const prNumber = target && /^#?(\d{1,9})$/.exec(target);
-  if (prNumber) {
-    const repo = await originRepo(process.cwd());
-    if (!repo) throw new UsageError(`Couldn't tell which GitHub repo this is. Try: oqgit review owner/repo#${prNumber[1]}`);
-    target = `${repo}#${prNumber[1]}`;
-  }
-
-  let ctx;
-  try {
-    if (target) {
-      spin?.start("Reading the change from GitHub");
-      const t = parseReviewTarget(target, { allowShorthand: true, pr, head: flags.head, base: flags.base });
-      ctx = await new GitHubPrClient({
-        token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN || undefined,
-        apiBase: process.env.OQGIT_API_BASE || undefined,
-        userAgent: `oqgit/${VERSION}`,
-      }).getContext(t);
-      if (flags.goal) ctx.goal = flags.goal;
-    } else {
-      if (pr || flags.head) throw new UsageError("--pr and --head need an owner/repo target, e.g. oqgit review cli/cli --pr 12.");
-      spin?.start("Reading this branch's changes");
-      ctx = await localContext({ cwd: process.cwd(), base: flags.base, goal: flags.goal });
-    }
-  } catch (err) {
-    spin?.error(err instanceof Error ? err.message : "Couldn't read the change");
-    throw err;
-  }
-  const where = ctx.source === "pr" ? `${ctx.repo}#${ctx.number}` : `${ctx.head} → ${ctx.base}`;
-  spin?.stop(`${c.bold(where)} ${c.dim(`· ${ctx.state} · ${ctx.files.length} files`)}`);
-
-  spin?.start(`Reviewing with ${model.model} ${c.dim(flags.fast ? "(fast mode)" : "(deep thinking: can take several minutes; --fast is quicker)")}`);
+  spin?.start(target ? "Reading the change from GitHub" : "Reading this branch's changes");
+  let requestedModel: string | undefined;
   let result: ReviewResult;
   try {
-    const envLimit = Number(process.env.OQGIT_REVIEW_MAX_INPUT_TOKENS);
-    const maxInputTokens = envLimit > 0 ? envLimit : await loadInputLimit(model.model);
-    result = await reviewChange(ctx, model, {
-      maxInputTokens,
+    result = await createReviewService({ cwd: process.cwd(), version: VERSION }).review({
+      target, pr, head: flags.head, base: flags.base, goal: flags.goal, model: flags.model, fast: flags.fast,
+    }, {
+      onContext: (ctx, model) => {
+        requestedModel = model;
+        const where = ctx.source === "pr" ? `${ctx.repo}#${ctx.number}` : `${ctx.head} → ${ctx.base}`;
+        spin?.stop(`${c.bold(where)} ${c.dim(`· ${ctx.state} · ${ctx.files.length} files`)}`);
+        spin?.start(`Reviewing with ${model} ${c.dim(flags.fast ? "(fast mode)" : "(deep thinking: can take several minutes; --fast is quicker)")}`);
+      },
       onProgress: (e) => {
-        void saveInputLimit(model.model, e.inputTokenLimit).catch(() => {});
         const msg = `Your key allows ${e.inputTokenLimit.toLocaleString("en-US")} input tokens/min (free tier). ${e.waitSeconds > 0 ? `Retrying in ${e.waitSeconds}s` : "Retrying now"} with the diff trimmed to fit${e.unreviewed ? ` (${e.unreviewed} files left out)` : ""}`;
         if (spin) spin.message(msg);
         else if (!flags.json && !flags["prompt-only"]) console.error(msg);
       },
     });
   } catch (err) {
-    if (err instanceof ModelQuotaError && err.inputTokenLimit) await saveInputLimit(model.model, err.inputTokenLimit).catch(() => {});
     spin?.error(err instanceof ResolveError ? err.message : "Review failed");
     if (err instanceof ModelQuotaError && err.inputTokenLimit) {
       throw new ResolveError("AI_RATE_LIMITED", `${err.message} The limit is saved: the next run trims the diff to fit and won't be rejected.`);
     }
     throw err;
   }
-  spin?.stop(`Reviewed by ${result.model}${result.model !== model.model ? c.dim(` (fallback: ${model.model} was rate limited or busy)`) : ""}`);
+  spin?.stop(`Reviewed by ${result.model}${requestedModel && result.model !== requestedModel ? c.dim(` (fallback: ${requestedModel} was rate limited or busy)`) : ""}`);
 
   const code = flags.strict && !result.verdict.safeToMerge ? EXIT.policy : EXIT.ok;
   if (flags.json) {
@@ -1769,7 +1719,7 @@ async function cmdReview(target: string | undefined, flags: Flags): Promise<numb
   }
   const list = (files: string[]) => `${files.slice(0, 8).join(", ")}${files.length > 8 ? ` +${files.length - 8} more` : ""}`;
   if (result.change.unreviewedFiles.length) {
-    p.log.warn(`${c.warn("Partial review.")} Not fully reviewed (over the model's input limit): ${c.dim(list(result.change.unreviewedFiles))}`);
+    p.log.warn(`${c.warn("Partial review.")} Not fully reviewed (missing diff or input limit): ${c.dim(list(result.change.unreviewedFiles))}`);
   }
   if (result.change.skippedFiles.length) p.log.message(c.dim(`Skipped (lockfile, generated or binary): ${list(result.change.skippedFiles)}`));
 
