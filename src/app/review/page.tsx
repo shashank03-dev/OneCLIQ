@@ -33,7 +33,7 @@ export default function ReviewPage() {
   return (
     <>
       <SiteNav />
-      <main id="main" className="relative isolate flex-1 overflow-hidden bg-paper pb-20 pt-6 sm:pb-28 sm:pt-10">
+      <main id="main" className="relative isolate flex-1 overflow-hidden bg-paper pb-20 pt-24 sm:pb-28 sm:pt-28">
         <SoftPatterns
           pattern="dots"
           backgroundColor="var(--paper)"

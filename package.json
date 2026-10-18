@@ -19,11 +19,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "next build && playwright test",
-    "cli:build": "tsup",
+    "cli:build": "node scripts/build-skills.mjs && tsup",
+    "skills:build": "node scripts/build-skills.mjs",
+    "skills:check": "node scripts/build-skills.mjs --check",
     "cli:dev": "tsx cli/src/bin.ts",
     "cli:pack": "npm run cli:build && npm pack ./cli --dry-run",
     "cli:publish": "npm run cli:build && npm publish ./cli",
-    "check": "npm run lint && npm run typecheck && npm run test && npm run build && npm run cli:build"
+    "check": "npm run skills:check && npm run lint && npm run typecheck && npm run test && npm run build && npm run cli:build"
   },
   "dependencies": {
     "clsx": "^2.1.1",

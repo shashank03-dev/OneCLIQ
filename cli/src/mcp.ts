@@ -3,7 +3,10 @@
  * Codex …) can find the right release binary and check its provenance instead of guessing URLs
  * or piping install scripts to a shell.
  *
- * Read-only by default. `download_release` exists only when started with --allow-download, and it
+ * It also serves the OneCLIQ skill library: agents can search it and install a skill into the
+ * project's skills folder (new files only; never overwrites unless asked).
+ *
+ * Read-only otherwise. `download_release` exists only when started with --allow-download, and it
  * still never runs anything: it saves the file and reports where.
  */
 import { stat } from "node:fs/promises";
@@ -18,7 +21,9 @@ import { parseGitHubUrl } from "../../src/core/parse-url";
 import { ResolveError } from "../../src/core/errors";
 import { ARCH_VALUES, OS_VALUES, type Arch, type Os, type Platform } from "../../src/core/types";
 import type { VirusTotalClient } from "../../src/core/virustotal";
+import { AGENT_IDS, DOMAINS, findSkill, searchSkills, type AgentId } from "../../src/core/skills";
 import { downloadAsset } from "./download";
+import { installSkills } from "./skills";
 import { lockPath, readLock, sha256File } from "./lock";
 import type { SystemInfo } from "./system";
 
@@ -186,6 +191,62 @@ export function buildTools(deps: Deps): Tool[] {
         return { lockfile: file, clean: results.every((r) => r.drift.length === 0), results };
       },
     },
+    {
+      name: "search_skills",
+      description:
+        "Search the OneCLIQ skill library: expert Agent Skills (SKILL.md) for developers, grouped by domain. Use when a task would go better with a proven workflow (e.g. 'review this PR', 'write playwright tests', 'safe migration'). Returns names and descriptions; call get_skill to read one.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Free-text words, e.g. 'react performance'. Empty lists everything." },
+          domain: { type: "string", enum: DOMAINS.map((d) => d.id) },
+          limit: { type: "number", description: "Default 10" },
+        },
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      run: async (args) => {
+        const limit = typeof args.limit === "number" && args.limit > 0 ? Math.min(args.limit, 50) : 10;
+        const found = searchSkills(str(args, "query") ?? "", { domain: str(args, "domain"), limit });
+        return { count: found.length, skills: found.map(({ name, domain, description }) => ({ name, domain, description })) };
+      },
+    },
+    {
+      name: "get_skill",
+      description: "Read one skill from the OneCLIQ library: its full SKILL.md instructions. Follow them for the current task, or call install_skill to keep it in the project.",
+      inputSchema: { type: "object", properties: { name: { type: "string", description: "Skill name, e.g. secure-code-review" } }, required: ["name"] },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      run: async (args) => {
+        const skill = findSkill(str(args, "name", true)!);
+        if (!skill) throw new ResolveError("INVALID_REQUEST", "No skill by that name. Use search_skills to find one.");
+        return { name: skill.name, domain: skill.domain, description: skill.description, content: skill.content };
+      },
+    },
+    {
+      name: "install_skill",
+      description:
+        "Install skills from the OneCLIQ library into this project's agent skills folder (e.g. .claude/skills/<name>/SKILL.md) so they load in future sessions. Writes new files only; existing skills are left alone unless overwrite is true.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          names: { type: "array", items: { type: "string" }, description: "Skill names to install" },
+          agent: { type: "string", enum: [...AGENT_IDS], description: "Which agent's folder (default claude)" },
+          overwrite: { type: "boolean" },
+        },
+        required: ["names"],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      run: async (args) => {
+        const names = Array.isArray(args.names) ? args.names.filter((n): n is string => typeof n === "string") : [];
+        if (!names.length) throw new ResolveError("INVALID_REQUEST", "Pass names: an array of skill names.");
+        const skills = names.map((n) => findSkill(n));
+        const missing = names.filter((_, i) => !skills[i]);
+        if (missing.length) throw new ResolveError("INVALID_REQUEST", `Unknown skills: ${missing.join(", ")}. Use search_skills.`);
+        const agent = (str(args, "agent") ?? "claude") as AgentId;
+        if (!AGENT_IDS.includes(agent)) throw new ResolveError("INVALID_REQUEST", `agent must be one of ${AGENT_IDS.join(", ")}.`);
+        const results = await installSkills(skills as NonNullable<(typeof skills)[number]>[], { agents: [agent], cwd: deps.cwd, force: args.overwrite === true });
+        return { results };
+      },
+    },
   ];
 
   if (deps.allowDownload) {
@@ -239,9 +300,9 @@ export async function handleMessage(msg: Json, tools: Tool[], version: string): 
       return reply({
         protocolVersion: asked && MCP_PROTOCOL_VERSIONS.includes(asked) ? asked : MCP_PROTOCOL_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "oqgit", title: "oqgit — GitHub release resolver", version },
+        serverInfo: { name: "oqgit", title: "oqgit — GitHub releases and developer skills", version },
         instructions:
-          "Use resolve_release to get the right binary for a GitHub project instead of guessing asset URLs, release_trust before installing it, and check_malware to see whether antivirus engines flag the file. Files are never executed by this server.",
+          "Use resolve_release to get the right binary for a GitHub project instead of guessing asset URLs, release_trust before installing it, and check_malware to see whether antivirus engines flag the file. Use search_skills and get_skill to pull an expert workflow (code review, security, testing, migrations, Gemma 4 …) into the current task. Files are never executed by this server.",
       });
     }
     case "ping":

@@ -1,327 +1,254 @@
+<div align="center">
+
 # OneCLIQ
 
-**The right download from any GitHub release, plus AI review for your pull requests.**
+**The right download from any GitHub release, a Gemma 4 pull request reviewer, and a skill library for your coding agent.**
 
 [![CI](https://github.com/shashank03-dev/OneCLIQ/actions/workflows/ci.yml/badge.svg)](https://github.com/shashank03-dev/OneCLIQ/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/onecliq?label=npm%20%C2%B7%20onecliq)](https://www.npmjs.com/package/onecliq)
+[![Agent Skills](https://img.shields.io/badge/agent%20skills-21-7c6cf0)](skills)
+[![Gemma 4](https://img.shields.io/badge/reviews%20by-Gemma%204-e5582b)](#-review-pull-requests-with-gemma-4)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**[Open the web app](https://onecliq-eta.vercel.app)** · **[Review a pull request](https://onecliq-eta.vercel.app/review)** · **[Install the CLI](#install-the-cli)**
+[**Open the app**](https://onecliq-eta.vercel.app) · [**Browse skills**](https://onecliq-eta.vercel.app/skills) · [**Review a PR**](https://onecliq-eta.vercel.app/review) · [**Install the CLI**](#-quick-start)
 
-GitHub releases often ship dozens of files: installers, archives and packages for every operating system and CPU. OneCLIQ reads a release and picks the one built for your machine. It also checks where the file came from (attestations, digests, re-uploads) and whether antivirus engines already know it as malware. And it reviews pull requests with Google's Gemma 4 model: it ranks the issues by risk, says whether the PR is safe to merge, and writes one prompt you can hand to any AI coding assistant to fix everything.
+<img src="src/app/opengraph-image.png" alt="OneCLIQ: the right download from any GitHub release" width="760">
 
-You can use it two ways:
+</div>
 
-- **Web app**: paste a GitHub link and get the right download, a trust report and a malware check. Or paste a pull request and get a review.
-- **`oqgit` CLI**: the same engine in your terminal. It downloads and verifies files, tracks them for updates, pins them in a team lockfile, reviews your branch, and serves all of it to coding agents over MCP.
+---
+
+## What it does
+
+| | | |
+| --- | --- | --- |
+| 📦 **Get the right file** | Paste a GitHub link. OneCLIQ picks the release file built for your OS and CPU, checks where it came from, and looks it up for known malware. | [Web](https://onecliq-eta.vercel.app) · `oqgit owner/repo` |
+| 🔍 **Review a pull request** | Gemma 4 ranks issues by risk, gives each one a failure scenario and a fix, decides if it's safe to merge, and writes one fix prompt for your agent. | [Web](https://onecliq-eta.vercel.app/review) · `oqgit review` |
+| 🧠 **Teach your agent** | 21 hand-written [Agent Skills](https://agentskills.io) in 7 domains. One command installs them into Claude Code, Codex, Cursor, Gemini CLI, Copilot or OpenCode. | [Web](https://onecliq-eta.vercel.app/skills) · `oqgit skills` |
+
+Everything runs on one open-source engine, shared by the web app, the `oqgit` CLI, and an MCP server for coding agents.
+
+## 🚀 Quick start
+
+```bash
+npx onecliq skills                        # browse the skill library
+npx onecliq skills add pull-request-review # install a skill for your coding agent
+npx onecliq sharkdp/bat                    # download the right file for this computer
+npx onecliq review 12                      # Gemma 4 review of PR 12 in this repo
+```
+
+Install it for good (the command is `oqgit`):
+
+```bash
+curl -fsSL https://onecliq-eta.vercel.app/install | sh   # macOS / Linux
+irm https://onecliq-eta.vercel.app/install | iex          # Windows PowerShell
+npm install -g onecliq                                    # or with npm
+```
+
+The installers are short and readable ([install.sh](public/install.sh), [install.ps1](public/install.ps1)), need Node.js 20+, and never ask for sudo.
+
+## 🏆 Built for Hacktoberfest 2026 Hack Day Bengaluru
+
+| Track | How OneCLIQ fits |
+| --- | --- |
+| **Best Use of Gemma 4** | Code review runs on `gemma-4-31b-it`, with the `gemma-4-26b-a4b-it` mixture-of-experts model as a fast fallback. A key pool rotates free-tier keys, rests rate-limited ones and trims oversized diffs so it works on free quotas. The merge verdict is computed from Gemma's structured findings, so it's deterministic. |
+| **Best Open-Source AI Project** | MIT licensed. Ships 21 agent skills that follow the [Agent Skills open standard](https://agentskills.io/specification) (validated in CI), an original zero-dependency MCP server, and a CLI that installs skills into six coding agents. |
+
+---
+
+## 🧠 Skill library
+
+Skills are folders with a `SKILL.md`: instructions a coding agent loads when the task matches. Ours are written like a senior engineer's checklist: a workflow, the rules, the pitfalls, and a "done when" list.
+
+| Domain | Skills |
+| --- | --- |
+| **Frontend** | `react-performance` · `web-accessibility` · `micro-interactions` |
+| **Backend** | `rest-api-design` · `safe-database-migrations` · `idempotent-webhooks` |
+| **DevOps** | `github-actions-ci` · `dockerfile-best-practices` · `release-binaries` |
+| **Security** | `secure-code-review` · `secrets-hygiene` · `supply-chain-verify` |
+| **Testing** | `write-unit-tests` · `flaky-test-triage` · `playwright-e2e` |
+| **AI engineering** | `gemma-4-prompting` · `llm-evals` · `mcp-server-builder` |
+| **Git workflow** | `pull-request-review` · `conventional-commits` · `git-recovery` |
+
+### Add skills from the terminal
+
+```bash
+oqgit skills                               # list everything, by domain
+oqgit skills search flaky tests            # search
+oqgit skills show secure-code-review       # read one
+oqgit skills add secure-code-review        # install one
+oqgit skills add security                  # install a whole domain
+oqgit skills add llm-evals --agent claude,cursor --global
+```
+
+`add` writes `<agent folder>/<name>/SKILL.md`. With no `--agent`, it uses the agents your project already has (else Claude Code). It never overwrites a skill you've edited unless you pass `--force`.
+
+| Agent | `--agent` | Project folder | `--global` folder |
+| --- | --- | --- | --- |
+| Claude Code | `claude` | `.claude/skills` | `~/.claude/skills` |
+| Codex CLI | `codex` | `.agents/skills` | `~/.agents/skills` |
+| Cursor | `cursor` | `.cursor/skills` | `~/.cursor/skills` |
+| Gemini CLI | `gemini` | `.gemini/skills` | `~/.gemini/skills` |
+| GitHub Copilot | `copilot` | `.github/skills` | `~/.copilot/skills` |
+| OpenCode | `opencode` | `.opencode/skills` | `~/.config/opencode/skills` |
+
+### Or let your agent find skills itself (MCP)
+
+```bash
+claude mcp add oqgit -- npx -y onecliq mcp     # Claude Code
+codex mcp add oqgit -- npx -y onecliq mcp      # Codex CLI
+gemini mcp add oqgit npx -y onecliq mcp        # Gemini CLI
+```
+
+For Cursor or VS Code, add `{"command": "npx", "args": ["-y", "onecliq", "mcp"]}` as the `oqgit` server in `.cursor/mcp.json` or `.vscode/mcp.json`.
+
+Then just ask: *"find a skill for safe database migrations and install it."* The agent calls `search_skills`, reads the match with `get_skill`, and saves it with `install_skill`.
+
+### Write a skill
+
+1. Create `skills/<domain>/<name>/SKILL.md` with `name` (same as the folder), `description` (what it does **and when to use it**), `license` and `metadata.domain`.
+2. Run `npm run skills:build`. It checks every skill against the standard and regenerates the catalog.
+3. Open a PR. CI runs `npm run skills:check`.
+
+---
+
+## 🔍 Review pull requests with Gemma 4
+
+Paste a PR, a `/tree/branch` link or a `/compare/a...b` link on the [review page](https://onecliq-eta.vercel.app/review), or run `oqgit review` in a repo. You get:
+
+- **Findings ranked by risk** (*must fix*, *high*, *medium*, *low*, *nit*), each with file, line, a concrete failure scenario and a fix.
+- **A merge verdict** (*Ready to merge*, *Safe after follow-ups*, *Not safe to merge*), computed from the findings. A review that couldn't see every file is never marked safe.
+- **A goal check**, a suggested PR title, and **one fix prompt** to paste into any coding agent.
+
+```bash
+oqgit review                    # this branch vs its base
+oqgit review 12                 # PR 12 in this repo
+oqgit review owner/repo#12 --goal "retry failed uploads"
+oqgit review --strict           # exit code 4 unless safe to merge (for CI)
+```
+
+**Models.** `gemma-4-31b-it` first; `gemma-4-26b-a4b-it` when the primary is rate limited or overloaded. Get free keys at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and set `GEMINI_API_KEYS` (one or many, comma-separated).
+
+**Free-tier friendly.** Reviews rotate across keys, rest a key that hits its quota (per model), bench invalid keys, and fall back to the faster model. If a diff is over the per-minute token cap, it's trimmed and the skipped files are marked unreviewed.
+
+**Privacy.** The diff is sent to Google's Gemini API. The web app reviews public repositories only; use `oqgit review` for private code.
+
+---
+
+## 📦 Get the right download
+
+Paste a repo or release link on the [web app](https://onecliq-eta.vercel.app). It detects your OS and CPU and shows:
+
+- **The recommended file** with a direct GitHub link, or **Not recommended** with the reason (it never guesses between ambiguous names).
+- **A trust report**: build attestations, GitHub's SHA-256 digest, immutable releases, re-uploads after publishing, release age and size jumps.
+- **A known-malware check**: the file's SHA-256 looked up on VirusTotal.
+
+In the terminal, `oqgit owner/repo` downloads the file, checks its size and SHA-256 against GitHub, and remembers it for `oqgit update`. Already have a file? Drop it on the web verifier (only its hash leaves your browser) or run `oqgit verify ./file owner/repo`.
 
 > [!IMPORTANT]
-> **A recommendation is about compatibility, not safety.** OneCLIQ checks files for *known* malware (VirusTotal hash lookups, plus an optional local ClamAV scan in the CLI), but a clean result never proves software is harmless. The web app never installs anything. The CLI saves files to disk and opens them only when you ask.
+> A recommendation is about compatibility, not safety. Malware checks find *known* malware only. OneCLIQ never installs or runs anything.
 
-## Contents
-
-- [Install the CLI](#install-the-cli)
-- [Using OneCLIQ](#using-onecliq)
-- [AI code review](#ai-code-review)
-- [CLI reference](#cli-reference)
-- [HTTP API](#http-api)
-- [Configuration](#configuration)
-- [How it works](#how-it-works)
-- [Development](#development)
-- [Deployment](#deployment)
-- [Releasing the CLI](#releasing-the-cli)
-- [Security](#security)
-- [Limitations](#limitations)
-- [Contributing and license](#contributing-and-license)
-
-## Install the CLI
-
-**macOS / Linux**
-
-```bash
-curl -fsSL https://onecliq-eta.vercel.app/install | sh
-```
-
-**Windows** (PowerShell)
-
-```powershell
-irm https://onecliq-eta.vercel.app/install | iex
-```
-
-The installer checks for Node.js 20 or newer and installs from npm. It never asks for sudo or admin rights: if npm's global folder isn't writable, it installs to `~/.local` and shows the one line to add to your `PATH`. Both scripts are short and readable: [install.sh](public/install.sh), [install.ps1](public/install.ps1).
-
-If you already have Node.js, npm works directly. The package is called `onecliq`; the command is `oqgit`.
-
-```bash
-npm install -g onecliq   # install
-npx onecliq sharkdp/bat  # or run once without installing
-```
-
-Then try:
-
-```bash
-oqgit sharkdp/bat        # download the right file for this computer
-oqgit review 12          # AI review of pull request 12 in this repo
-oqgit                    # interactive menu
-```
-
-## Using OneCLIQ
-
-### Find the right download
-
-On the [web app](https://onecliq-eta.vercel.app), paste a repository or release link such as `https://github.com/sharkdp/bat`. The page detects your operating system and CPU (you can change them), then shows:
-
-- **The recommended file**, with its size and a direct GitHub download link. When nothing fits, or several files tie, it says **Not recommended** and links to the release page so you can choose.
-- **A trust report**: build attestations, GitHub's SHA-256 digest, immutable releases, files changed after publishing, release age, signatures, unusual size changes, and who uploaded the file.
-- **A known-malware check**: the file's published SHA-256, looked up on VirusTotal.
-
-In the terminal, `oqgit owner/repo` does the same and downloads the file. It verifies the size and SHA-256 against GitHub, runs the malware check, and remembers the download so `oqgit update` can fetch newer versions later.
-
-### Verify a file you already have
-
-Drop a file on the web app's verifier. Your browser hashes it locally, and only the 64-character SHA-256 is sent to the server, which checks whether the repository published a file with that exact digest. The CLI equivalent is `oqgit verify ./file owner/repo`.
-
-### Review a pull request
-
-On the [review page](https://onecliq-eta.vercel.app/review), paste a pull request (any state, drafts included), a `/tree/branch` link, or a `/compare/main...branch` link. You can also say what the change should achieve. In the terminal, `oqgit review` reviews your current branch, and it works with private repositories too. See [AI code review](#ai-code-review).
-
-## AI code review
-
-A review gives you:
-
-- **Findings ranked by risk**: *must fix*, *high*, *medium*, *low* and *nit*. Each finding has the file, line, a concrete failure scenario and a specific fix.
-- **A merge verdict** (*Ready to merge*, *Safe to merge after follow-ups* or *Not safe to merge*), with the reasons. OneCLIQ computes the verdict from the findings rather than asking the model, so the same issues always give the same answer. A review that couldn't see every file is never marked safe.
-- **Goal check**: whether the change does what its title, description or your stated goal says.
-- **A suggested PR title**, and **one fix prompt** to paste into any AI coding assistant.
-
-### Models and API keys
-
-Reviews use **Gemma 4** through the Gemini API. Get free keys at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
-
-| | Default | Why |
-| --- | --- | --- |
-| Primary model | `gemma-4-31b-it` | Gemma 4's largest and most capable model. |
-| Fallback model | `gemma-4-26b-a4b-it` | Gemma 4's mixture-of-experts model: much faster, same prompt format, and a separate quota bucket. |
-
-You can give OneCLIQ **one key or many**. Each review is routed like this:
-
-1. **Rotate.** Consecutive reviews start on different keys, so no single key takes all the load.
-2. **Rest a rate-limited key.** When a key hits its quota (HTTP 429), it rests for that model until the quota resets, and the next key takes over. Quotas are per model, so a key that's resting on the primary model can still serve the fallback.
-3. **Fall back.** If the primary model is rate limited on every key, or overloaded (5xx), the review moves to the fallback model.
-4. **Bench bad keys.** A key that Google rejects as invalid is set aside, and the review carries on with the others.
-5. **Wait only if it fits.** When every key is resting, the review waits for the first one to free up, but only if that still fits the time budget. Otherwise it fails fast with a clear message.
-
-On the web this all happens inside Vercel's 300-second function limit. In the CLI there's no such limit.
-
-On the Gemini free tier a prompt can exceed the per-minute input-token cap. When that happens, OneCLIQ trims the diff to fit and marks the left-out files as unreviewed (so the verdict can't be *safe*). It remembers the cap, so the next review trims up front.
-
-**Privacy:** the diff is sent to Google's Gemini API. The web app reviews **public** repositories only, even if the server's GitHub token could read private ones. Use `oqgit review` for private repositories and local branches.
+---
 
 ## CLI reference
 
-Run `oqgit` with no arguments for a menu. `oqgit owner/repo` is short for `oqgit get owner/repo`. To target another computer, add an OS and CPU (`oqgit cli/cli windows arm64`; `mac`, `win`, `intel` and `amd64` work too). Add `@tag` for a specific release (`oqgit sharkdp/bat@v0.25.0`). `oqgit help <command>` shows a command's options.
+`oqgit` with no arguments opens a menu. `oqgit help <command>` shows a command's options; `oqgit help all` shows everything.
 
 | Command | What it does |
 | --- | --- |
-| `oqgit owner/repo [os] [cpu]` | Choose and download a file (asks first when interactive). Same as `oqgit get`. |
-| `oqgit info owner/repo [os] [cpu]` | Show the release and every file, with detected platforms. |
-| `oqgit list` / `outdated` / `update [repo]` | List tracked downloads, check for newer releases, download updates. |
-| `oqgit forget owner/repo` | Stop tracking (files stay on disk). |
-| `oqgit trust owner/repo` | Provenance report for the selected file. |
-| `oqgit malware owner/repo` | VirusTotal hash check; `--local` scans a temporary copy with ClamAV. |
-| `oqgit verify ./file owner/repo` | Find the published release file matching a local file's SHA-256. |
-| `oqgit diff owner/repo [from] [to]` | Compare two releases' files, sizes and platform coverage. |
-| `oqgit lock owner/repo` | Pin files for every OS/CPU in `oqgit.lock.json`. Also `lock show`, `check`, `update`, `remove`. |
-| `oqgit sync` | Download this machine's locked files. |
-| `oqgit review [12 \| link]` | AI review of this branch, PR 12 in this repo, or any PR, branch or compare link. |
-| `oqgit mcp` | Model Context Protocol server over stdio, for coding agents. |
+| `oqgit owner/repo [os] [cpu]` | Download the right file (same as `oqgit get`). Add `@tag` for a specific release. |
+| `oqgit info owner/repo` | Show every file in the release and what it was detected as. |
+| `oqgit list` · `outdated` · `update` · `forget` | Manage tracked downloads. |
+| `oqgit trust` · `malware` · `verify` · `diff` | Provenance, known-malware check, verify a local file, compare releases. |
+| `oqgit lock owner/repo` · `sync` | Pin files for every platform in `oqgit.lock.json`; download this machine's pinned files. |
+| `oqgit review [12 \| link]` | Gemma 4 review of a PR, a branch or this repo's changes. |
+| `oqgit skills [search\|show\|add]` | Browse, read and install agent skills. |
+| `oqgit mcp` | MCP server over stdio for coding agents. |
 | `oqgit doctor` | System info, token status and GitHub API quota. |
 
-**Common flags:** `--os`, `--arch`, `-t/--tag`, `-o/--out`, `-n/--dry-run`, `-y/--yes`, `-f/--force`, `--json`, `--min-age 3d`, `--no-track`, `--no-trust`, `--no-malware`. For `review`: `-g/--goal`, `--fast`, `--copy`, `--prompt-only`, `--strict` (exit code 4 unless safe to merge, for CI), and `--model`. `oqgit help all` lists everything. Without a terminal, `get` needs `--yes` to download.
+**Exit codes:** `0` ok · `1` error · `2` bad usage · `3` no reliable file match · `4` a trust, verification, lock, malware or `--strict` review policy failed.
 
-**Exit codes:** `0` success · `1` error · `2` bad usage or URL · `3` no reliable file match · `4` a trust, verification, lock, malware or `--strict` review policy failed.
-
-**Where files go:** downloads go to `~/Downloads` (or the current folder), and `--out` changes that. Each download is written to a `.part` file, checked against GitHub's size and SHA-256 digest when GitHub publishes one, and deleted if they don't match. Tracking data lives in `~/.oqgit/state.json` (`%APPDATA%\oqgit` on Windows, `$XDG_CONFIG_HOME/oqgit` on Linux when set). `OQGIT_HOME` overrides that location.
-
-**Lockfiles:** commit `oqgit.lock.json` so teammates and CI resolve the same files. `oqgit lock check` catches removed or changed files. `oqgit sync` downloads into `.oqgit/downloads/` and checks each file against its pinned digest. `--extract` unpacks archives with the system's `unzip`/`tar`.
-
-**MCP:** `oqgit mcp` offers `resolve_release`, `release_trust`, `check_malware`, `release_diff`, `verify_file` and `lock_check`. It's read-only unless started with `--allow-download`. It downloads files but never runs them. Add it to Claude Code with `claude mcp add oqgit -- oqgit mcp`.
+**MCP tools:** `search_skills`, `get_skill`, `install_skill`, `resolve_release`, `release_trust`, `check_malware`, `release_diff`, `verify_file`, `lock_check`, plus `download_release` when started with `--allow-download`. Downloads are verified and never executed; `install_skill` only creates new files unless asked to overwrite.
 
 ## HTTP API
 
-The web app's API is open to call directly. All POST routes take JSON (`Content-Type: application/json`, bodies up to 4 KB) and reply with `Cache-Control: no-store`.
-
-| Route | Request | Response (`ok: true`) |
-| --- | --- | --- |
-| `POST /api/resolve` | `{"url":"https://github.com/sharkdp/bat","os":"linux","arch":"x64"}` | `repo`, `release`, `platform`, `recommendation` |
-| `POST /api/trust` | same `url`, `os`, `arch` | `file`, `tag`, `trust` (level, score, checks) |
-| `POST /api/malware` | same `url`, `os`, `arch` | `file`, `tag`, `malware` (status, checks) |
-| `POST /api/verify` | `{"repo":"owner/repo","sha256":"<64 hex>"}` | `repo`, `sha256`, `scanned`, `match`, `attestations` |
-| `POST /api/review` | `{"url":"https://github.com/o/r/pull/12","goal":"optional"}` | `model`, `change`, `title`, `summary`, `intent`, `verdict`, `findings`, `testsToAdd`, `fixPrompt` |
-| `GET /api/health` | none | which features are configured, review models, deployed commit (never keys) |
-
-`os` is `windows`, `macos` or `linux`; `arch` is `x64`, `arm64` or `x86`.
+| Route | Does |
+| --- | --- |
+| `GET /api/skills?q=&domain=` | Search the skill library (JSON) |
+| `GET /api/skills/<name>` | One raw `SKILL.md` (`?download` to save it) |
+| `POST /api/resolve` | `{"url","os","arch"}` → the recommended file |
+| `POST /api/trust` · `/api/malware` | Trust report · known-malware check for that file |
+| `POST /api/verify` | `{"repo","sha256"}` → the matching release file, if any |
+| `POST /api/review` | `{"url","goal?"}` → findings, verdict and fix prompt |
+| `GET /api/health` | Which features are configured (never keys) |
 
 ```bash
-curl -sS https://onecliq-eta.vercel.app/api/resolve \
-  -H 'Content-Type: application/json' \
-  -d '{"url":"https://github.com/sharkdp/bat","os":"linux","arch":"x64"}'
+curl -s https://onecliq-eta.vercel.app/api/skills/git-recovery > .claude/skills/git-recovery/SKILL.md
 ```
 
-Errors return `{"ok": false, "error": {"code", "message"}}` with a matching HTTP status. The codes are `INVALID_URL`, `INVALID_REQUEST`, `REPO_NOT_FOUND`, `RELEASE_NOT_FOUND`, `NO_RELEASES`, `NO_STABLE_RELEASE`, `PR_NOT_FOUND`, `RATE_LIMITED`, `TIMEOUT`, `NETWORK`, `UPSTREAM`, `AI_NOT_CONFIGURED`, `AI_ERROR` and `AI_RATE_LIMITED`. Rate-limited replies include `retryAfter` seconds and a `Retry-After` header.
-
-Some details worth knowing:
-
-- `recommendation.status` is `"recommended"` (with an `asset`) or `"not-recommended"` (with a `reason`).
-- `/api/verify` searches the latest 100 releases.
-- `/api/malware` sends only the published SHA-256 to VirusTotal, never the file. Its statuses are `flagged`, `no-known-detections`, `unknown` and `unavailable`; it never says "safe".
+POST routes take JSON up to 4 KB. Errors are `{"ok": false, "error": {"code", "message"}}` with a matching status; rate-limited replies include `Retry-After`.
 
 ## Configuration
 
-Everything is optional; with no configuration the app works and reviews are simply turned off. For local development, copy [.env.example](.env.example) to `.env.local`. On Vercel, set these under **Project → Settings → Environment Variables**.
-
-**Core**
+Everything is optional. Copy [.env.example](.env.example) to `.env.local` for local development.
 
 | Variable | Purpose |
 | --- | --- |
-| `GITHUB_TOKEN` | Raises GitHub's API limit from 60 to 5,000 requests per hour. **Recommended in production**: without it, every visitor shares the server's 60 requests per hour. No scopes are needed for public repos. |
-| `VIRUSTOTAL_API_KEY` | Turns on known-malware hash lookups. The free tier allows about 4 per minute and 500 per day. |
-| `NEXT_PUBLIC_SITE_URL` | Public URL, used for social preview links. It's applied at build time, so redeploy after changing it. |
-| `RESOLVE_RATE_LIMIT_PER_MIN` | Requests per minute per IP across the API routes. Default `30`. |
+| `GEMINI_API_KEYS` | One or more Gemini keys. Turns on reviews. |
+| `GITHUB_TOKEN` | Raises GitHub's API limit from 60 to 5,000 requests/hour. Recommended in production. |
+| `VIRUSTOTAL_API_KEY` | Turns on known-malware hash lookups. |
+| `REVIEW_MODEL` · `REVIEW_FALLBACK_MODELS` | Defaults `gemma-4-31b-it` · `gemma-4-26b-a4b-it` (`none` turns fallbacks off). |
+| `REVIEW_THINKING` | `minimal` (web default, fits the time limit) or `high`. |
+| `REVIEW_MAX_INPUT_TOKENS` · `REVIEW_RATE_LIMIT_PER_MIN` · `RESOLVE_RATE_LIMIT_PER_MIN` | Limits. |
+| `NEXT_PUBLIC_SITE_URL` | Public URL for social previews (build time). |
 
-**Code review**
-
-| Variable | Purpose |
-| --- | --- |
-| `GEMINI_API_KEYS` | One or more Gemini keys, comma- or newline-separated. Turns on `/review`. |
-| `GEMINI_API_KEY` | A single key (or another list). Merged with `GEMINI_API_KEYS`. |
-| `REVIEW_MODEL` | Primary model. Default `gemma-4-31b-it`. |
-| `REVIEW_FALLBACK_MODELS` | Fallbacks, in order. Default `gemma-4-26b-a4b-it`; `none` turns them off. |
-| `REVIEW_THINKING` | `minimal` (default on the web, fits the time limit) or `high` (deeper, slower). |
-| `REVIEW_MAX_INPUT_TOKENS` | Trim large diffs up front, e.g. `16000` on the free tier. Learned automatically otherwise. |
-| `REVIEW_RATE_LIMIT_PER_MIN` | Reviews per minute per IP. Default `3`. |
-
-**CLI.** The CLI reads `GITHUB_TOKEN` or `GH_TOKEN`, `VIRUSTOTAL_API_KEY`, and `GEMINI_API_KEYS` / `GEMINI_API_KEY` / `GOOGLE_API_KEY`. It also reads:
-
-- `OQGIT_REVIEW_MODEL` and `OQGIT_REVIEW_FALLBACK_MODELS`
-- `OQGIT_MIN_AGE`: default release cooldown
-- `OQGIT_HOME`: tracking folder
-- `OQGIT_CLAMSCAN`: path to a ClamAV binary
-
-**Testing only.** Never set these in production: `GITHUB_API_BASE_URL`, `GEMINI_API_BASE_URL` and `VIRUSTOTAL_API_BASE_URL`, and in the CLI `OQGIT_API_BASE`, `OQGIT_VT_API_BASE` and `OQGIT_GEMINI_API_BASE`.
+The CLI reads `GITHUB_TOKEN`/`GH_TOKEN`, `VIRUSTOTAL_API_KEY`, `GEMINI_API_KEYS`/`GEMINI_API_KEY`, and `OQGIT_REVIEW_MODEL`, `OQGIT_MIN_AGE`, `OQGIT_HOME`, `OQGIT_CLAMSCAN`.
 
 ## How it works
 
 ```
- browser ──► Next.js API routes (src/app/api) ──► src/server (config, clients, rate limits)
-                                                        │
- oqgit CLI (cli/src) ───────────────────────────────────┼──► src/core  (framework-free engine)
-                                                        │      ├─ resolve: parse URL → pick release → match file
-                                                        │      ├─ trust / malware / verify
-                                                        │      └─ review: GitHub diff → prompt → key pool + model router → verdict
-                                                        ▼
-                                         GitHub API · VirusTotal · Gemini API
+ web app (Next.js) ─┐
+ oqgit CLI ─────────┼──► src/core  (one framework-free engine)
+ MCP server ────────┘      ├─ resolve   parse link → pick release → match file to OS/CPU
+                           ├─ trust · malware · verify · lockfile
+                           ├─ review    GitHub diff → prompt → key pool → Gemma 4 → verdict
+                           └─ skills    skills/**/SKILL.md → validated catalog → search · install
+                                   │
+                    GitHub API · Gemini API (Gemma 4) · VirusTotal
 ```
-
-The web app and the CLI share one engine, `src/core`, so they always give the same answer. A download is resolved in five steps:
-
-1. **Parse the link.** It accepts `github.com` repository and release links; the CLI also accepts `owner/repo`. A `/releases/tag/…` link selects that exact release.
-2. **Pick a release.** It uses GitHub's latest stable release, falling back to the newest non-draft, non-prerelease among the last 30.
-3. **Validate.** Zod checks GitHub's data. It drops incomplete uploads, and any URL that isn't a GitHub release asset.
-4. **Match.** Filenames are classified by OS, CPU and format. Source bundles, checksums, signatures and update manifests are excluded. Native builds rank above compatible ones, and then the most suitable format wins.
-5. **Answer.** It returns one file with its size and direct GitHub link, or *Not recommended* with the reason.
-
-Matching relies on how projects name their files. It can't prove a binary runs on your machine.
 
 | Path | What lives there |
 | --- | --- |
-| `src/core/parse-url.ts`, `github.ts`, `match.ts`, `resolve.ts` | Link parsing, GitHub client with short caching, file matching, the resolver |
-| `src/core/trust.ts`, `inspect.ts`, `malware.ts`, `virustotal.ts` | Trust reports, digest matching, malware checks |
-| `src/core/releases.ts`, `lockfile.ts` | Release cooldowns, comparisons, lockfile pins and drift |
-| `src/core/review/` | PR context, prompt packing, `key-pool.ts` (key rotation and cooldowns), `gemma.ts` (model router), verdict and fix prompt |
-| `src/server/` | `config.ts` (all environment settings in one place), shared clients, the review service, JSON parsing, rate limiting |
-| `src/app/`, `src/components/`, `src/lib/api.ts` | Pages, API routes, UI, and the browser's fetch helper (turns platform errors into readable messages) |
-| `cli/src/` | CLI commands, downloads, tracking, lockfile sync, MCP server, terminal UI |
-| `public/install.sh`, `public/install.ps1` | One-line installers. `/install` serves the right one by user agent (see `next.config.ts`). |
-| `tests/unit/`, `e2e/` | Vitest unit tests; Playwright desktop and mobile tests against a mock GitHub |
-
-Interface design notes are in [DESIGN.md](DESIGN.md).
+| `skills/` | The skill library: `<domain>/<name>/SKILL.md` |
+| `scripts/build-skills.mjs` | Validates skills against the Agent Skills spec, builds `src/core/skills/catalog.json` |
+| `src/core/` | Resolver, trust, malware, lockfile, `review/` (Gemma client, key pool, verdict), `skills/` |
+| `src/app/`, `src/components/` | Pages, API routes and UI ([DESIGN.md](DESIGN.md) has the design system) |
+| `cli/src/` | CLI commands, downloads, skill installer, MCP server |
+| `tests/unit/`, `e2e/` | Vitest and Playwright tests |
 
 ## Development
 
-You need Node.js 20.9 or newer.
+Requires Node.js 20.9+.
 
 ```bash
-git clone https://github.com/shashank03-dev/OneCLIQ.git
-cd OneCLIQ
+git clone https://github.com/shashank03-dev/OneCLIQ.git && cd OneCLIQ
 npm ci
-npm run dev                                   # http://localhost:3000
-npm run cli:dev -- get sharkdp/bat --dry-run  # run the CLI from source
+npm run dev                          # http://localhost:3000
+npm run cli:dev -- skills            # run the CLI from source
+npm run check                        # what CI runs: skills, lint, types, tests, builds
 ```
 
-| Command | What it runs |
-| --- | --- |
-| `npm run check` | Everything CI runs: lint, typecheck, unit tests, web build, CLI build |
-| `npm run lint` / `typecheck` / `test` | ESLint / Next type generation + `tsc` / Vitest |
-| `npm run build` / `cli:build` | Production web build / bundle `cli/dist/oqgit.mjs` |
-| `npm run test:e2e` | Playwright browser tests. Run `npx playwright install chromium` first. It builds the app first. |
+Production deploys to Vercel from `main`. The CLI is published to npm as [`onecliq`](https://www.npmjs.com/package/onecliq): bump `cli/package.json`, run `npm run cli:publish`, then approve the staged version on npmjs.com.
 
-When you change behavior, update the matching tests in `tests/unit/`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow.
+## Security and limits
 
-## Deployment
+- Tokens and keys stay on the server (or your machine). The web app only ever serves **public** repositories.
+- Downloads must be HTTPS GitHub release assets; every redirect is checked. Malware lookups send only a SHA-256.
+- File matching is name-based: unusual names can mean no recommendation (the release page is always linked).
+- Malware checks catch known malware only. Rate limits and caches are per server instance.
 
-### Vercel (production)
-
-Production runs on Vercel at **https://onecliq-eta.vercel.app**, from the `onecliq` project linked to this repository:
-
-- **Every push to `main` deploys to production.** Pull requests and other branches get preview deployments.
-- **Settings live in Vercel**, under Project → Settings → Environment Variables. See [Configuration](#configuration). Store keys as *Sensitive*.
-- **After changing a variable, redeploy.** Running deployments keep the values they were built with. Use Deployments → ⋯ → Redeploy, or push a commit.
-- **Check health** with `curl https://onecliq-eta.vercel.app/api/health`. It shows which features are configured and the deployed commit, never key values.
-
-The project is sized for the Hobby plan: `/api/review` sets `maxDuration = 300` and finishes, or fails cleanly, within that limit. Rate limits and caches live in memory on each server instance, so they're best-effort rather than global.
-
-### Other Node.js hosts
-
-```bash
-npm ci && npm run build && npm start
-```
-
-Serve it over HTTPS. The API routes need a running Node.js server; static hosting won't work. Behind a proxy, make sure `X-Forwarded-For` is trustworthy, because rate limits are per IP.
-
-## Releasing the CLI
-
-The CLI is published to npm as [`onecliq`](https://www.npmjs.com/package/onecliq). The account uses npm's **staged publishing**, so every release takes two steps:
-
-1. **Stage it.** Bump `version` in `cli/package.json`, then run `npm run cli:publish` from the repository root. This builds the bundle and stages the version. Staging doesn't need two-factor authentication.
-2. **Approve it.** Sign in at [npmjs.com](https://www.npmjs.com), open the **Staged Packages** tab, review the version and click **Approve**. Or use the terminal: `npm stage list onecliq`, then `npm stage approve <stage-id>`. Approving asks for your 2FA code. ([npm docs](https://docs.npmjs.com/staged-publishing))
-
-The version is installable once it's approved. Check with `npm view onecliq version`.
-
-## Security
-
-- API inputs are validated and size-limited, and GitHub API paths are built only from validated values.
-- Downloads must be HTTPS GitHub release links. The CLI checks every redirect against GitHub's asset hosts.
-- Tokens and API keys stay on the server (or your machine, for the CLI). They never reach the browser, and `/api/health` never reveals them.
-- **The web app only ever serves public repositories.** Before reading any release data, the server checks the repository's visibility and treats private ones as not found. This holds even when `GITHUB_TOKEN` can read private repos. The CLI uses your own token, so it can read your private repos for you.
-- Malware lookups send only a SHA-256. Local ClamAV scans run offline.
-- Security headers (CSP `frame-ancestors`, `X-Frame-Options`, `nosniff`, referrer and permissions policies) are set in `next.config.ts`.
-- The trust score summarizes GitHub's metadata. OneCLIQ looks up attestations but doesn't fully verify Sigstore signatures; when attestations exist, it suggests a `gh attestation verify` command for that.
-
-Please report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
-
-## Limitations
-
-- **Public GitHub only** on the web: no private repositories, and no GitHub Enterprise.
-- **Name-based matching.** Unusual file names can prevent a recommendation. The release page is always linked.
-- **History limits.** Release fallback looks at 30 releases; verify searches 100. Files without a GitHub-published SHA-256 (common before mid-2025) can't be verified or looked up on VirusTotal.
-- **Known malware only.** New or rare malware is often missed.
-- **Browser detection.** macOS CPU detection can be uncertain, and browsers can't tell Linux distributions apart. The CLI reads `/etc/os-release` to prefer `.deb` or `.rpm`.
-- **Big files in the browser.** The web verifier rejects files over 2 GiB; use `oqgit verify` instead.
-- **Per-instance state.** Rate limits, caches and the review key cooldowns aren't shared between server instances.
+Report vulnerabilities privately: see [SECURITY.md](SECURITY.md).
 
 ## Contributing and license
 
-Bug reports, reproduction steps, docs and tests are all welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and follow the [Code of Conduct](CODE_OF_CONDUCT.md). Licensed under [MIT](LICENSE); third-party notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-The site adapts [DesignPass.dev components](https://designpass.dev/components) by [Ernest Liu](https://ernestliu.com), with attribution in `src/components/designpass/` and [DESIGN.md](DESIGN.md). It's built with Next.js, React, Tailwind CSS, Zod, Vitest and Playwright. Further reading: the [GitHub Releases API](https://docs.github.com/en/rest/releases/releases), [GitHub artifact attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) and the [Gemini API](https://ai.google.dev/gemini-api/docs).
+New skills, bug reports and fixes are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). MIT licensed, skills included. Third-party notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); the site adapts [DesignPass.dev](https://designpass.dev/components) components by [Ernest Liu](https://ernestliu.com).
